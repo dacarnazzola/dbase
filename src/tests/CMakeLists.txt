@@ -7,3 +7,6 @@ target_link_libraries(test_debug lib_modules)
 
 add_executable(test_random test_random.f90)
 target_link_libraries(test_random lib_modules)
+
+add_executable(test_statistics test_statistics.f90)
+target_link_libraries(test_statistics lib_modules)
