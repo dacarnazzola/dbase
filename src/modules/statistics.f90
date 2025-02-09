@@ -1,5 +1,5 @@
 module statistics
-use, non_intrinsic :: kinds, only: i32, i64, sp, dp
+use, non_intrinsic :: kinds, only: i32, i64, sp, dp, c_bool
 use, non_intrinsic :: system, only: debug_error_condition
 use, non_intrinsic :: constants, only: i32_vec_len, i64_vec_len, sp_vec_len, dp_vec_len
 implicit none
@@ -110,7 +110,8 @@ contains
         real(kind=sp) :: val
         integer(kind=i64) :: n
         n = size(x, kind=i64)
-        call debug_error_condition(n < 1_i64, 'module STATISTICS :: avg function invalid for array with length < 1')
+        call debug_error_condition(logical(n < 1_i64, kind=c_bool), &
+                                   'module STATISTICS :: avg function invalid for array with length < 1')
         val = dsum(x)/real(n, kind=sp)
     end function avg_sp
 
@@ -119,7 +120,8 @@ contains
         real(kind=dp) :: val
         integer(kind=i64) :: n
         n = size(x, kind=i64)
-        call debug_error_condition(n < 1_i64, 'module STATISTICS :: avg function invalid for array with length < 1')
+        call debug_error_condition(logical(n < 1_i64, kind=c_bool), &
+                                   'module STATISTICS :: avg function invalid for array with length < 1')
         val = dsum(x)/real(n, kind=dp)
     end function avg_dp
 
@@ -128,7 +130,8 @@ contains
         real(kind=sp) :: val
         integer(kind=i64) :: n
         n = size(x, kind=i64)
-        call debug_error_condition(n < 2_i64, 'module STATISTICS :: std function invalid for array with length < 2')
+        call debug_error_condition(logical(n < 2_i64, kind=c_bool), &
+                                   'module STATISTICS :: std function invalid for array with length < 2')
         val = sqrt(dsum((x - avg(x))**2_i32)/real(n - 1_i64, kind=sp))
     end function std_sp
 
@@ -137,7 +140,8 @@ contains
         real(kind=dp) :: val
         integer(kind=i64) :: n
         n = size(x, kind=i64)
-        call debug_error_condition(n < 2_i64, 'module STATISTICS :: std function invalid for array with length < 2')
+        call debug_error_condition(logical(n < 2_i64, kind=c_bool), &
+                                   'module STATISTICS :: std function invalid for array with length < 2')
         val = sqrt(dsum((x - avg(x))**2_i32)/real(n - 1_i64, kind=dp))
     end function std_dp
 
