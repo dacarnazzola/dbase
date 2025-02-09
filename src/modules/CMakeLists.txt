@@ -6,6 +6,7 @@ set(MODULE_FILES
     timing.f90
     random.f90
     statistics.f90
+    sorting.f90
    )
 
 # compile module source code files to lib_modules

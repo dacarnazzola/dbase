@@ -10,3 +10,6 @@ target_link_libraries(test_random lib_modules)
 
 add_executable(test_statistics test_statistics.f90)
 target_link_libraries(test_statistics lib_modules)
+
+add_executable(test_sorting test_sorting.f90)
+target_link_libraries(test_sorting lib_modules)
