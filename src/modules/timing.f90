@@ -1,6 +1,6 @@
 module timing
 use, non_intrinsic :: kinds, only: i64, dp
-use, non_intrinsic :: constants, only: debug
+use, non_intrinsic :: system, only: debug_error_condition
 implicit none
 private
 
@@ -24,22 +24,15 @@ contains
     impure elemental subroutine toc(t)
         type(timer), intent(inout) :: t
         call system_clock(count=t%count2)
-        if (debug) then
-            if (t%count_rate <= 0_i64) then
-                error stop 'module TIMING :: must call tic(timer) before toc(timer)'
-            end if
-        end if
+        call debug_error_condition(t%count_rate <= 0_i64, 'module TIMING :: must call tic(timer) before toc(timer)')
         t%elapsed = real(max(t%count2 - t%count1, 1_i64), kind=dp)/real(t%count_rate, kind=dp)
     end subroutine toc
 
     pure elemental function get_elapsed(t) result(elapsed_sec)
         type(timer), intent(in) :: t
         real(kind=dp) :: elapsed_sec
-        if (debug) then
-            if (t%elapsed <= 0.0_dp) then
-                error stop 'module TIMING :: must call tic(timer) and toc(timer) before get_elapsed(timer)'
-            end if
-        end if
+        call debug_error_condition(t%elapsed <= 0.0_dp, &
+                                   'module TIMING :: must call tic(timer) and toc(timer) before get_elapsed(timer)')
         elapsed_sec = t%elapsed
     end function get_elapsed
 

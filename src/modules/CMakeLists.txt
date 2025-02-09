@@ -2,6 +2,7 @@
 set(MODULE_FILES 
     kinds.f90
     constants.f90
+    system.f90
     timing.f90
     random.f90
     statistics.f90
