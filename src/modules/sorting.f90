@@ -30,7 +30,7 @@ contains
         integer(kind=i32) :: val(size(x, kind=i64))
         integer(kind=i64) :: n
         n = size(x, kind=i64)
-        if (n > 8_i64) then
+        if (n > 256_i64) then
             val = [qsort(pack(x, x < x(1_i64))), &
                    x(1_i64), &
                    qsort(pack(x(2_i64:n), x(2_i64:n) >= x(1_i64)))]
