@@ -1,74 +1,67 @@
 program test_sorting
-use, non_intrinsic :: kinds, only: stdout, i32, i64, c_bool, dp
+use, non_intrinsic :: kinds, only: stdout, i32, i64, sp, dp
 use, non_intrinsic :: random, only: random_uniform
 use, non_intrinsic :: sorting, only: is_sorted, sort
-use, non_intrinsic :: timing, only: timer, tic, toc, get_elapsed
+use, non_intrinsic :: system, only: nearly
 implicit none
 
-    integer(kind=i64), parameter :: n = 32_i64
-    integer(kind=i32), parameter :: k_max = 1000_i32
+    integer(kind=i64), parameter :: n = 128_i64
 
-    integer(kind=i32) :: arr(n), arr_dupe(n), i, k, arri(n)
-    logical(kind=c_bool) :: sorted
-    integer(kind=i32), allocatable :: x(:), ns(:), x2(:), xi(:), xi2(:)
-    type(timer) :: bench(2)
-    real(kind=dp) :: times(size(bench))
+    integer(kind=i32) :: xi32(n), xi322(n)
+    integer(kind=i64) :: xi64(n), xindi64(n), i, xi642(n)
+    real(kind=sp) :: xsp(n), xsp2(n)
+    real(kind=dp) :: xdp(n), xdp2(n)
 
-    arri = [(i, i=1,n)]
-    call random_uniform(arr, -100_i32, 100_i32)
-    arr_dupe = arr
-    sorted = is_sorted(arr)
-    write(unit=stdout, fmt='(a,l1,a,*(i4," "))') 'TEST_SORTING ::      arr, sorted=',sorted,' :: ',arr
+    call random_uniform(xi32, -100_i32, 100_i32)
+    write(unit=stdout, fmt='(a,l1)') 'TEST_SORTING :: random i32 array is_sorted: ',is_sorted(xi32)
+    write(unit=stdout, fmt='(a,*(i0," "))') 'TEST_SORTING :: i32 array: ',xi32
+    xi322 = xi32
+    call sort(xi32)
+    write(unit=stdout, fmt='(a,l1)') 'TEST_SORTING :: i32 array after SORT is_sorted: ',is_sorted(xi32)
+    write(unit=stdout, fmt='(a,*(i0," "))') 'TEST_SORTING :: i32 array: ',xi32
+    xi32 = xi322
+    xindi64 = [(i, i=1_i64,n)]
+    call sort(xi32, xindi64)
+    write(unit=stdout, fmt='(2(a,l1),/)') 'TEST_SORTING :: i32 array after SORT with indices is_sorted: ',is_sorted(xi32), &
+                                       ' and sorted indices: ',all(xi32 == xi322(xindi64))
 
-    call sort(arr)
-    sorted = is_sorted(arr)
-    write(unit=stdout, fmt='(a,l1,a,*(i4," "))') 'TEST_SORTING :: SORT arr, sorted=',sorted,' :: ',arr
-    arr = arr_dupe
+    call random_uniform(xi64, -100_i64, 100_i64)
+    write(unit=stdout, fmt='(a,l1)') 'TEST_SORTING :: random i64 array is_sorted: ',is_sorted(xi64)
+    write(unit=stdout, fmt='(a,*(i0," "))') 'TEST_SORTING :: i64 array: ',xi64
+    xi642 = xi64
+    call sort(xi64)
+    write(unit=stdout, fmt='(a,l1)') 'TEST_SORTING :: i64 array after SORT is_sorted: ',is_sorted(xi64)
+    write(unit=stdout, fmt='(a,*(i0," "))') 'TEST_SORTING :: i64 array: ',xi64
+    xi64 = xi642
+    xindi64 = [(i, i=1_i64,n)]
+    call sort(xi64, xindi64)
+    write(unit=stdout, fmt='(2(a,l1),/)') 'TEST_SORTING :: i64 array after SORT with indices is_sorted: ',is_sorted(xi64), &
+                                       ' and sorted indices: ',all(xi64 == xi642(xindi64))
 
-    call sort(arr, arri)
-    sorted = is_sorted(arr)
-    write(unit=stdout, fmt='(a,l1,a,*(i4," "))') 'TEST_SORTING :: SORT arr, sorted=',sorted,' :: ',arr
+    call random_uniform(xsp, -100.0_sp, 100.0_sp)
+    write(unit=stdout, fmt='(a,l1)') 'TEST_SORTING :: random sp array is_sorted: ',is_sorted(xsp)
+    write(unit=stdout, fmt='(a,*(f0.1," "))') 'TEST_SORTING :: sp array: ',xsp
+    xsp2 = xsp
+    call sort(xsp)
+    write(unit=stdout, fmt='(a,l1)') 'TEST_SORTING :: sp array after SORT is_sorted: ',is_sorted(xsp)
+    write(unit=stdout, fmt='(a,*(f0.1," "))') 'TEST_SORTING :: sp array: ',xsp
+    xsp = xsp2
+    xindi64 = [(i, i=1_i64,n)]
+    call sort(xsp, xindi64)
+    write(unit=stdout, fmt='(2(a,l1),/)') 'TEST_SORTING :: sp array after SORT with indices is_sorted: ',is_sorted(xsp), &
+                                       ' and sorted indices: ',all(nearly(xsp,xsp2(xindi64)))
 
-    if (allocated(ns)) deallocate(ns); allocate(ns(0))
-    do i=1_i32,6_i32
-        ns = [ns, 10_i32**i]
-    end do
-    do i=0_i32,20_i32
-        ns = [ns, 2_i32**i]
-    end do
-    call sort(ns)
-    write(unit=stdout, fmt='(a,*(i0," "))') 'TEST_SORTING :: ns: ',ns
-
-    write(unit=stdout, fmt='(a)') 'TEST_SORTING :: benchmark qsort vs isort'
-    write(unit=stdout, fmt='(*(a22))') 'N Elements |','SORT Time |','SORT2 Time |'
-    do i=1_i32,size(ns, kind=i32)
-        if (allocated(x)) deallocate(x)
-        if (allocated(x2)) deallocate(x2)
-        if (allocated(xi)) deallocate(xi)
-        if (allocated(xi2)) deallocate(xi2)
-        allocate(x(ns(i)), x2(ns(i)), xi(ns(i)), xi2(ns(i)))
-        xi = [(k, k=1,ns(i))]
-        xi2 = xi
-        times = 0.0_dp
-        do k=1_i32,k_max
-            call random_uniform(x, 0_i32, huge(1_i32))
-            x2 = x
-            call tic(bench(1))
-            call sort(x)
-            call toc(bench(1))
-            if (.not.is_sorted(x)) error stop 'x not sorted after SORT (values)'
-            x = x2
-            xi = xi2
-            call tic(bench(2))
-            call sort(x, xi)
-            call toc(bench(2))
-            if (.not.is_sorted(x) .or. any(x /= x2(xi))) error stop 'x not sorted after SORT (values and indices)'
-            times = times + get_elapsed(bench)
-        end do
-        times = times/real(k_max, kind=dp)
-        write(unit=stdout, fmt='(i22,*(e22.15))') ns(i),times
-    end do
-
-    write(unit=stdout, fmt='(a,2(i0," "))') 'COMPLETE !! ',minval(x),maxval(x)
+    call random_uniform(xdp, -100.0_dp, 100.0_dp)
+    write(unit=stdout, fmt='(a,l1)') 'TEST_SORTING :: random dp array is_sorted: ',is_sorted(xdp)
+    write(unit=stdout, fmt='(a,*(f0.1," "))') 'TEST_SORTING :: dp array: ',xdp
+    xdp2 = xdp
+    call sort(xdp)
+    write(unit=stdout, fmt='(a,l1)') 'TEST_SORTING :: dp array after SORT is_sorted: ',is_sorted(xdp)
+    write(unit=stdout, fmt='(a,*(f0.1," "))') 'TEST_SORTING :: dp array: ',xdp
+    xdp = xdp2
+    xindi64 = [(i, i=1_i64,n)]
+    call sort(xdp, xindi64)
+    write(unit=stdout, fmt='(2(a,l1),/)') 'TEST_SORTING :: dp array after SORT with indices is_sorted: ',is_sorted(xdp), &
+                                       ' and sorted indices: ',all(nearly(xdp,xdp2(xindi64)))
 
 end program test_sorting
