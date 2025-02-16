@@ -13,3 +13,6 @@ target_link_libraries(test_statistics lib_modules)
 
 add_executable(test_sorting test_sorting.f90)
 target_link_libraries(test_sorting lib_modules)
+
+add_executable(test_vector_math test_vector_math.f90)
+target_link_libraries(test_vector_math lib_modules)
