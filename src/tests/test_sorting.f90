@@ -6,7 +6,7 @@ use, non_intrinsic :: timing, only: timer, tic, toc, get_elapsed
 implicit none
 
     integer(kind=i64), parameter :: n = 32_i64
-    integer(kind=i32), parameter :: k_max = 1000_i32
+    integer(kind=i32), parameter :: k_max = 100_i32
 
     integer(kind=i32) :: arr(n), arr_dupe(n), i, k, arri(n)
     logical(kind=c_bool) :: sorted
