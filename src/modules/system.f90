@@ -12,7 +12,7 @@ private
     interface nearly
         module procedure :: nearly_sp
         module procedure :: nearly_dp
-    end interface
+    end interface nearly
 
     public :: debug_error_condition, nearly
 
