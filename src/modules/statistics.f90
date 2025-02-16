@@ -27,7 +27,14 @@ private
         module procedure :: normal_pdf_dp
     end interface normal_pdf
 
-    public :: dsum, avg, std, normal_pdf
+    interface normalize
+        module procedure :: normalize_inline_sp
+        module procedure :: normalize_sp
+        module procedure :: normalize_inline_dp
+        module procedure :: normalize_dp
+    end interface normalize
+
+    public :: dsum, avg, std, normal_pdf, normalize
 
 contains
 
@@ -169,5 +176,27 @@ contains
         sig2 = sig*sig
         val = exp(-(x - mu)**2_i32/(2.0_dp*sig2))/sqrt(twopi_dp*sig2)
     end function normal_pdf_dp
+
+    pure subroutine normalize_inline_sp(x)
+        real(kind=sp), intent(inout) :: x(:)
+        x = x/dsum(x)
+    end subroutine normalize_inline_sp
+
+    pure subroutine normalize_sp(x, xnorm)
+        real(kind=sp), intent(in) :: x(:)
+        real(kind=sp), intent(out) :: xnorm(size(x, kind=i64))
+        xnorm = x/dsum(x)
+    end subroutine normalize_sp
+
+    pure subroutine normalize_inline_dp(x)
+        real(kind=dp), intent(inout) :: x(:)
+        x = x/dsum(x)
+    end subroutine normalize_inline_dp
+
+    pure subroutine normalize_dp(x, xnorm)
+        real(kind=dp), intent(in) :: x(:)
+        real(kind=dp), intent(out) :: xnorm(size(x, kind=i64))
+        xnorm = x/dsum(x)
+    end subroutine normalize_dp
 
 end module statistics
