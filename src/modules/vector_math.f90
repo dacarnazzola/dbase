@@ -20,12 +20,22 @@ private
         module procedure :: vmag_dp
     end interface vmag
 
+    interface vunit2
+        module procedure :: vunit2_sp
+        module procedure :: vunit2_dp
+    end interface vunit2
+
+    interface vunit3
+        module procedure :: vunit3_sp
+        module procedure :: vunit3_dp
+    end interface vunit3
+
     interface vunit
         module procedure :: vunit_sp
         module procedure :: vunit_dp
     end interface vunit
 
-    public :: vmag2, vmag3, vmag, vunit
+    public :: vmag2, vmag3, vmag, vunit2, vunit3, vunit
 
 contains
 
@@ -64,6 +74,46 @@ contains
         real(kind=dp) :: val
         val = sqrt(dsum(v*v))
     end function vmag_dp
+
+    pure subroutine vunit2_sp(v, vhat)
+        real(kind=sp), intent(in) :: v(2)
+        real(kind=sp), intent(out) :: vhat(2)
+        real(kind=sp) :: mag
+        mag = vmag2(v)
+        call debug_error_condition(nearly(mag, 0.0_sp), &
+                                   'module VECTOR_MATH :: vunit2 subroutine invalid for vectors with magnitude near 0.0')
+        vhat = v/mag
+    end subroutine vunit2_sp
+
+    pure subroutine vunit2_dp(v, vhat)
+        real(kind=dp), intent(in) :: v(2)
+        real(kind=dp), intent(out) :: vhat(2)
+        real(kind=dp) :: mag
+        mag = vmag2(v)
+        call debug_error_condition(nearly(mag, 0.0_dp), &
+                                   'module VECTOR_MATH :: vunit2 subroutine invalid for vectors with magnitude near 0.0')
+        vhat = v/vmag(v)
+    end subroutine vunit2_dp
+
+    pure subroutine vunit3_sp(v, vhat)
+        real(kind=sp), intent(in) :: v(3)
+        real(kind=sp), intent(out) :: vhat(3)
+        real(kind=sp) :: mag
+        mag = vmag3(v)
+        call debug_error_condition(nearly(mag, 0.0_sp), &
+                                   'module VECTOR_MATH :: vunit3 subroutine invalid for vectors with magnitude near 0.0')
+        vhat = v/mag
+    end subroutine vunit3_sp
+
+    pure subroutine vunit3_dp(v, vhat)
+        real(kind=dp), intent(in) :: v(3)
+        real(kind=dp), intent(out) :: vhat(3)
+        real(kind=dp) :: mag
+        mag = vmag3(v)
+        call debug_error_condition(nearly(mag, 0.0_dp), &
+                                   'module VECTOR_MATH :: vunit3 subroutine invalid for vectors with magnitude near 0.0')
+        vhat = v/vmag(v)
+    end subroutine vunit3_dp
 
     pure subroutine vunit_sp(v, vhat)
         real(kind=sp), intent(in) :: v(:)
