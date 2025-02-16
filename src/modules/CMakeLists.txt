@@ -7,6 +7,7 @@ set(MODULE_FILES
     random.f90
     statistics.f90
     sorting.f90
+    vector_math.f90
    )
 
 # compile module source code files to lib_modules

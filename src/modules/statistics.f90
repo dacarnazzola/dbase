@@ -1,6 +1,6 @@
 module statistics
 use, non_intrinsic :: kinds, only: i32, i64, sp, dp, c_bool
-use, non_intrinsic :: system, only: debug_error_condition
+use, non_intrinsic :: system, only: debug_error_condition, nearly
 use, non_intrinsic :: constants, only: i32_vec_len, i64_vec_len, sp_vec_len, dp_vec_len, twopi_sp, twopi_dp
 implicit none
 private
@@ -154,6 +154,8 @@ contains
         real(kind=sp), intent(in) :: x, mu, sig
         real(kind=sp) :: val
         real(kind=sp) :: sig2
+        call debug_error_condition(nearly(sig, 0.0_sp), &
+                                   'module STATISTICS :: normal_pdf function invalid for input with sig == 0.0')
         sig2 = sig*sig
         val = exp(-(x - mu)**2_i32/(2.0_sp*sig2))/sqrt(twopi_sp*sig2)
     end function normal_pdf_sp
@@ -162,6 +164,8 @@ contains
         real(kind=dp), intent(in) :: x, mu, sig
         real(kind=dp) :: val
         real(kind=dp) :: sig2
+        call debug_error_condition(nearly(sig, 0.0_dp), &
+                                   'module STATISTICS :: normal_pdf function invalid for input with sig == 0.0')
         sig2 = sig*sig
         val = exp(-(x - mu)**2_i32/(2.0_dp*sig2))/sqrt(twopi_dp*sig2)
     end function normal_pdf_dp
