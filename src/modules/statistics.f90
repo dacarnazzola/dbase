@@ -1,7 +1,7 @@
 module statistics
 use, non_intrinsic :: kinds, only: i32, i64, sp, dp, c_bool
 use, non_intrinsic :: system, only: debug_error_condition
-use, non_intrinsic :: constants, only: i32_vec_len, i64_vec_len, sp_vec_len, dp_vec_len
+use, non_intrinsic :: constants, only: i32_vec_len, i64_vec_len, sp_vec_len, dp_vec_len, twopi_sp, twopi_dp
 implicit none
 private
 
@@ -22,7 +22,12 @@ private
         module procedure :: std_dp
     end interface std
 
-    public :: dsum, avg, std
+    interface normal_pdf
+        module procedure :: normal_pdf_sp
+        module procedure :: normal_pdf_dp
+    end interface normal_pdf
+
+    public :: dsum, avg, std, normal_pdf
 
 contains
 
@@ -144,5 +149,21 @@ contains
                                    'module STATISTICS :: std function invalid for array with length < 2')
         val = sqrt(dsum((x - avg(x))**2_i32)/real(n - 1_i64, kind=dp))
     end function std_dp
+
+    pure elemental function normal_pdf_sp(x, mu, sig) result(val)
+        real(kind=sp), intent(in) :: x, mu, sig
+        real(kind=sp) :: val
+        real(kind=sp) :: sig2
+        sig2 = sig*sig
+        val = exp(-(x - mu)**2_i32/(2.0_sp*sig2))/sqrt(twopi_sp*sig2)
+    end function normal_pdf_sp
+
+    pure elemental function normal_pdf_dp(x, mu, sig) result(val)
+        real(kind=dp), intent(in) :: x, mu, sig
+        real(kind=dp) :: val
+        real(kind=dp) :: sig2
+        sig2 = sig*sig
+        val = exp(-(x - mu)**2_i32/(2.0_dp*sig2))/sqrt(twopi_dp*sig2)
+    end function normal_pdf_dp
 
 end module statistics

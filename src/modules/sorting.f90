@@ -9,7 +9,7 @@ private
 
     integer(kind=i64), parameter :: isort_cutoff = 64_i64
 
-    public :: is_sorted, qsort, isort, isort2, isort3, qsort2, msort, msort2, msort3, qsort3, qsorts
+    public :: is_sorted, qsort, isort, isort2, isort3, qsort2, msort, msort2, msort3, qsort3, qsorts, qsorts2
 
 contains
 
@@ -103,6 +103,54 @@ contains
             val(v+1_i64:n) = qsort3(val(v+1_i64:n))
         end if
     end function qsort3
+
+    pure recursive subroutine qsorts2(x, xi)
+        integer(kind=i32), intent(inout) :: x(:), xi(size(x, kind=i64))
+        integer(kind=i64) :: n, i
+        integer(kind=i32) :: u, v, w
+        n = size(x, kind=i64)
+!        if (n <= isort_cutoff) then
+        if (n <= 2_i64) then
+            call isorts2(x, xi)
+        else
+            u = x(1)
+            v = x(n/2)
+            w = x(n)
+            if ((v > u) .neqv. (v > w)) then !! v is median
+                x(1) = v
+                x(n/2) = u
+                v= xi(1)
+                xi(1) = xi(n/2)
+                xi(n/2) = v
+            else if ((w > u) .neqv. (w > v)) then !! w is median
+                x(1) = w
+                x(n) = u
+                v = xi(1)
+                xi(1) = xi(n)
+                xi(n) = v
+            end if !! u is median
+            v = 1_i32
+            do i=2_i64,n
+                if (x(i) < x(1_i64)) then
+                    v = v + 1_i32
+                    u = x(i)
+                    x(i) = x(v)
+                    x(v) = u
+                    u = xi(i)
+                    xi(i) = xi(v)
+                    xi(v) = u
+                end if
+            end do
+            u = x(v)
+            x(v) = x(1_i64)
+            x(1_i64) = u
+            u = xi(v)
+            xi(v) = xi(1_i64)
+            xi(1_i64) = u
+            call qsorts2(x(1_i64:v-1_i64), xi(1_i64:v-1_i64))
+            call qsorts2(x(v+1_i64:n), xi(v+1_i64:n))
+        end if
+    end subroutine qsorts2
 
     pure recursive subroutine qsorts(x)
         integer(kind=i32), intent(inout) :: x(:)
@@ -299,6 +347,29 @@ contains
             val(j) = temp
         end do
     end function isort2
+
+    pure subroutine isorts2(x, xi)
+        integer(kind=i32), intent(inout) :: x(:), xi(size(x, kind=i64))
+        integer(kind=i64) :: n, i, j
+        integer(kind=i32) :: temp, tempi
+        n = size(x, kind=i64)
+        do i=2_i64,n
+            if (x(i) < x(i-1_i64)) then
+                temp = x(i)
+                tempi = xi(i)
+                loop_j: do j=i,2_i64,-1_i64
+                    if (temp < x(j-1_i64)) then
+                        x(j) = x(j-1_i64)
+                        xi(j) = xi(j-1_i64)
+                    else
+                        exit loop_j
+                    end if
+                end do loop_j
+                x(j) = temp
+                xi(j) = tempi
+            end if
+        end do
+    end subroutine isorts2
 
     pure subroutine isorts(x)
         integer(kind=i32), intent(inout) :: x(:)
