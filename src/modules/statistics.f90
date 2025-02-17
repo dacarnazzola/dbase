@@ -34,7 +34,14 @@ private
         module procedure :: normalize_dp
     end interface normalize
 
-    public :: dsum, avg, std, normal_pdf, normalize
+    interface cumsum
+        module procedure :: cumsum_i32
+        module procedure :: cumsum_i64
+        module procedure :: cumsum_sp
+        module procedure :: cumsum_dp
+    end interface cumsum
+
+    public :: dsum, avg, std, normal_pdf, normalize, cumsum
 
 contains
 
@@ -198,5 +205,60 @@ contains
         real(kind=dp), intent(out) :: xnorm(size(x, kind=i64))
         xnorm = x/dsum(x)
     end subroutine normalize_dp
+
+    pure subroutine cumsum_i32(x, xcs)
+        integer(kind=i32), intent(in) :: x(:)
+        integer(kind=i32), intent(out) :: xcs(size(x, kind=i64))
+        integer(kind=i64) :: n, i
+        n = size(x, kind=i64)
+        call debug_error_condition(logical(n > 0_i64, kind=c_bool), &
+                                   'module STATISTICS :: cumsum subroutine invalid for array with length < 1')
+        xcs(1) = x(1)
+        do i=2_i64,n
+            xcs(i) = xcs(i-1_i64) + x(i)
+        end do
+    end subroutine cumsum_i32
+
+    pure subroutine cumsum_i64(x, xcs)
+        integer(kind=i64), intent(in) :: x(:)
+        integer(kind=i64), intent(out) :: xcs(size(x, kind=i64))
+        integer(kind=i64) :: n, i
+        n = size(x, kind=i64)
+        call debug_error_condition(logical(n > 0_i64, kind=c_bool), &
+                                   'module STATISTICS :: cumsum subroutine invalid for array with length < 1')
+        xcs(1) = x(1)
+        do i=2_i64,n
+            xcs(i) = xcs(i-1_i64) + x(i)
+        end do
+    end subroutine cumsum_i64
+
+    pure subroutine cumsum_sp(x, xcs)
+        real(kind=sp), intent(in) :: x(:)
+        real(kind=sp), intent(out) :: xcs(size(x, kind=i64))
+        integer(kind=i64) :: n, i
+        real(kind=dp) :: temp
+        n = size(x, kind=i64)
+        call debug_error_condition(logical(n > 0_i64, kind=c_bool), &
+                                   'module STATISTICS :: cumsum subroutine invalid for array with length < 1')
+        temp = real(x(1), kind=dp)
+        xcs(1) = real(temp, kind=sp)
+        do i=2_i64,n
+            temp = temp + real(x(i), kind=dp)
+            xcs(i) = real(temp, kind=sp)
+        end do
+    end subroutine cumsum_sp
+
+    pure subroutine cumsum_dp(x, xcs)
+        real(kind=dp), intent(in) :: x(:)
+        real(kind=dp), intent(out) :: xcs(size(x, kind=i64))
+        integer(kind=i64) :: n, i
+        n = size(x, kind=i64)
+        call debug_error_condition(logical(n > 0_i64, kind=c_bool), &
+                                   'module STATISTICS :: cumsum subroutine invalid for array with length < 1')
+        xcs(1) = x(1)
+        do i=2_i64,n
+            xcs(i) = xcs(i-1_i64) + x(i)
+        end do
+    end subroutine cumsum_dp
 
 end module statistics

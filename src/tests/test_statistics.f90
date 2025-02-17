@@ -1,15 +1,17 @@
 program test_statistics
 use, non_intrinsic :: kinds, only: stdout, i32, i64, sp, dp
-use, non_intrinsic :: statistics, only: dsum, avg, std, normal_pdf
+use, non_intrinsic :: statistics, only: dsum, avg, std, normal_pdf, cumsum
 use, non_intrinsic :: random, only: random_normal
+use, non_intrinsic :: timing, only: timer, tic, toc, get_elapsed
 implicit none
 
     integer(kind=i32), parameter :: n = 2_i32**20_i32, val = 1_i32, n2 = 10_i32*n
 
-    integer(kind=i32) :: xi32(n), i
+    integer(kind=i32) :: xi32(n), i, xi232(n)
     integer(kind=i64) :: xi64(n)
-    real(kind=sp) :: xsp(n), xsp2(n2), isp, pdfi, pdf_sum
-    real(kind=dp) :: xdp(n), xdp2(n2)
+    real(kind=sp) :: xsp(n), xsp2(n2), isp, pdfi, pdf_sum, x2sp(n)
+    real(kind=dp) :: xdp(n), xdp2(n2), x2dp(n)
+    type(timer) :: bench
 
     write(unit=stdout, fmt='(a,i0,a,i0)') 'TEST_STATISTICS :: ',n,' element arrays initialized to ',val
 
@@ -41,5 +43,25 @@ implicit none
         write(unit=stdout, fmt='(a,f0.1,a,f0.6)') 'TEST_STATISTICS :: normal_pdf(',isp,', 0.0_sp, 1.0_sp): ',pdfi
     end do
     write(unit=stdout, fmt='(a,f0.6)') 'TEST STATISTICS :: sum of normal_pdf (expect 1.0): ',pdf_sum
+
+    call random_number(xsp)
+    xi32 = nint(xsp)
+    call tic(bench)
+    call cumsum(xi32, xi232)
+    call toc(bench)
+    write(unit=stdout, fmt='(a,i0,a,f0.9,a,i0," ",i0)') 'TEST_STATISTICS :: cumsum "fast" method for ',n, &
+                                                        ' items in ',get_elapsed(bench),' sec, maxval: ',maxval(xi232),dsum(xi32)
+    call tic(bench)
+    call cumsum(xsp, x2sp)
+    call toc(bench)
+    write(unit=stdout, fmt='(a,i0,a,f0.9,a,f0.1," ",f0.1)') 'TEST_STATISTICS :: cumsum "fast sp" method for ',n, &
+                                                            ' items in ',get_elapsed(bench),' sec, maxval: ',maxval(x2sp),dsum(xsp)
+    xdp = real(xsp, kind=dp)
+    call tic(bench)
+    call cumsum(xdp, x2dp)
+    call toc(bench)
+    write(unit=stdout, fmt='(a,i0,a,f0.9,a,f0.1," ",f0.1)') 'TEST_STATISTICS :: cumsum "fast dp" method for ',n, &
+                                                            ' items in ',get_elapsed(bench),' sec, maxval: ',maxval(x2dp),dsum(xdp)
+
 
 end program test_statistics
