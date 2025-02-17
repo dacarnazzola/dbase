@@ -211,7 +211,7 @@ contains
         integer(kind=i32), intent(out) :: xcs(size(x, kind=i64))
         integer(kind=i64) :: n, i
         n = size(x, kind=i64)
-        call debug_error_condition(logical(n > 0_i64, kind=c_bool), &
+        call debug_error_condition(logical(n < 1_i64, kind=c_bool), &
                                    'module STATISTICS :: cumsum subroutine invalid for array with length < 1')
         xcs(1) = x(1)
         do i=2_i64,n
@@ -224,7 +224,7 @@ contains
         integer(kind=i64), intent(out) :: xcs(size(x, kind=i64))
         integer(kind=i64) :: n, i
         n = size(x, kind=i64)
-        call debug_error_condition(logical(n > 0_i64, kind=c_bool), &
+        call debug_error_condition(logical(n < 1_i64, kind=c_bool), &
                                    'module STATISTICS :: cumsum subroutine invalid for array with length < 1')
         xcs(1) = x(1)
         do i=2_i64,n
@@ -238,7 +238,7 @@ contains
         integer(kind=i64) :: n, i
         real(kind=dp) :: temp
         n = size(x, kind=i64)
-        call debug_error_condition(logical(n > 0_i64, kind=c_bool), &
+        call debug_error_condition(logical(n < 1_i64, kind=c_bool), &
                                    'module STATISTICS :: cumsum subroutine invalid for array with length < 1')
         temp = real(x(1), kind=dp)
         xcs(1) = real(temp, kind=sp)
@@ -253,7 +253,7 @@ contains
         real(kind=dp), intent(out) :: xcs(size(x, kind=i64))
         integer(kind=i64) :: n, i
         n = size(x, kind=i64)
-        call debug_error_condition(logical(n > 0_i64, kind=c_bool), &
+        call debug_error_condition(logical(n < 1_i64, kind=c_bool), &
                                    'module STATISTICS :: cumsum subroutine invalid for array with length < 1')
         xcs(1) = x(1)
         do i=2_i64,n
