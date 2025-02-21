@@ -41,7 +41,12 @@ private
         module procedure :: vunit_inplace_dp
     end interface vunit
 
-    public :: vmag2, vmag3, vmag, vunit2, vunit3, vunit
+    interface vdot
+        module procedure :: vdot_sp
+        module procedure :: vdot_dp
+    end interface vdot
+
+    public :: vmag2, vmag3, vmag, vunit2, vunit3, vunit, vdot
 
 contains
 
@@ -194,5 +199,17 @@ contains
                                    'module VECTOR_MATH :: vunit subroutine invalid for vectors with magnitude near 0.0')
         v = v/mag
     end subroutine vunit_inplace_dp
+
+    pure function vdot_sp(v1, v2) result(val)
+        real(kind=sp), intent(in) :: v1(:), v2(size(v1))
+        real(kind=sp) :: val
+        val = dsum(v1*v2)
+    end function vdot_sp
+
+    pure function vdot_dp(v1, v2) result(val)
+        real(kind=dp), intent(in) :: v1(:), v2(size(v1))
+        real(kind=dp) :: val
+        val = dsum(v1*v2)
+    end function vdot_dp
 
 end module vector_math
