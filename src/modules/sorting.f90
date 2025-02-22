@@ -99,7 +99,7 @@ contains
         integer(kind=i32) :: u, v, w
         n = size(x, kind=i64)
         if (n <= i32_vec_len) then
-            call isort_i32(x)
+            call isort(x)
         else
             u = x(1_i64)
             v = x(n/2_i64)
@@ -123,8 +123,8 @@ contains
             u = x(ii)
             x(ii) = x(1_i64)
             x(1_i64) = u
-            call qsort_i32(x(1_i64:ii-1_i64))
-            call qsort_i32(x(ii+1_i64:n))
+            call sort(x(1_i64:ii-1_i64))
+            call sort(x(ii+1_i64:n))
         end if
     end subroutine qsort_i32
 
@@ -133,7 +133,7 @@ contains
         integer(kind=i64) :: n, i, ii, u, v, w
         n = size(x, kind=i64)
         if (n <= i64_vec_len) then
-            call isort_i64(x)
+            call isort(x)
         else
             u = x(1_i64)
             v = x(n/2_i64)
@@ -157,8 +157,8 @@ contains
             u = x(ii)
             x(ii) = x(1_i64)
             x(1_i64) = u
-            call qsort_i64(x(1_i64:ii-1_i64))
-            call qsort_i64(x(ii+1_i64:n))
+            call sort(x(1_i64:ii-1_i64))
+            call sort(x(ii+1_i64:n))
         end if
     end subroutine qsort_i64
 
@@ -168,7 +168,7 @@ contains
         real(kind=sp) :: u, v, w
         n = size(x, kind=i64)
         if (n <= sp_vec_len) then
-            call isort_sp(x)
+            call isort(x)
         else
             u = x(1_i64)
             v = x(n/2_i64)
@@ -192,8 +192,8 @@ contains
             u = x(ii)
             x(ii) = x(1_i64)
             x(1_i64) = u
-            call qsort_sp(x(1_i64:ii-1_i64))
-            call qsort_sp(x(ii+1_i64:n))
+            call sort(x(1_i64:ii-1_i64))
+            call sort(x(ii+1_i64:n))
         end if
     end subroutine qsort_sp
 
@@ -203,7 +203,7 @@ contains
         real(kind=dp) :: u, v, w
         n = size(x, kind=i64)
         if (n <= dp_vec_len) then
-            call isort_dp(x)
+            call isort(x)
         else
             u = x(1_i64)
             v = x(n/2_i64)
@@ -227,8 +227,8 @@ contains
             u = x(ii)
             x(ii) = x(1_i64)
             x(1_i64) = u
-            call qsort_dp(x(1_i64:ii-1_i64))
-            call qsort_dp(x(ii+1_i64:n))
+            call sort(x(1_i64:ii-1_i64))
+            call sort(x(ii+1_i64:n))
         end if
     end subroutine qsort_dp
 
@@ -239,7 +239,7 @@ contains
         integer(kind=i32) :: u, v, w
         n = size(x, kind=i64)
         if (n <= i32_vec_len) then
-            call isort2_i32_i64(x, xi)
+            call isort(x, xi)
         else
             u = x(1_i64)
             v = x(n/2_i64)
@@ -276,8 +276,8 @@ contains
             uxi = xi(ii)
             xi(ii) = xi(1_i64)
             xi(1_i64) = uxi
-            call qsort2_i32_i64(x(1_i64:ii-1_i64), xi(1_i64:ii-1_i64))
-            call qsort2_i32_i64(x(ii+1_i64:n), xi(ii+1_i64:n))
+            call sort(x(1_i64:ii-1_i64), xi(1_i64:ii-1_i64))
+            call sort(x(ii+1_i64:n), xi(ii+1_i64:n))
         end if
     end subroutine qsort2_i32_i64
 
@@ -287,7 +287,7 @@ contains
         integer(kind=i64) :: n, i, ii, uxi, vxi, wxi, u, v, w
         n = size(x, kind=i64)
         if (n <= i64_vec_len) then
-            call isort2_i64_i64(x, xi)
+            call isort(x, xi)
         else
             u = x(1_i64)
             v = x(n/2_i64)
@@ -324,8 +324,8 @@ contains
             uxi = xi(ii)
             xi(ii) = xi(1_i64)
             xi(1_i64) = uxi
-            call qsort2_i64_i64(x(1_i64:ii-1_i64), xi(1_i64:ii-1_i64))
-            call qsort2_i64_i64(x(ii+1_i64:n), xi(ii+1_i64:n))
+            call sort(x(1_i64:ii-1_i64), xi(1_i64:ii-1_i64))
+            call sort(x(ii+1_i64:n), xi(ii+1_i64:n))
         end if
     end subroutine qsort2_i64_i64
 
@@ -336,7 +336,7 @@ contains
         real(kind=sp) :: u, v, w
         n = size(x, kind=i64)
         if (n <= sp_vec_len) then
-            call isort2_sp_i64(x, xi)
+            call isort(x, xi)
         else
             u = x(1_i64)
             v = x(n/2_i64)
@@ -373,8 +373,8 @@ contains
             uxi = xi(ii)
             xi(ii) = xi(1_i64)
             xi(1_i64) = uxi
-            call qsort2_sp_i64(x(1_i64:ii-1_i64), xi(1_i64:ii-1_i64))
-            call qsort2_sp_i64(x(ii+1_i64:n), xi(ii+1_i64:n))
+            call sort(x(1_i64:ii-1_i64), xi(1_i64:ii-1_i64))
+            call sort(x(ii+1_i64:n), xi(ii+1_i64:n))
         end if
     end subroutine qsort2_sp_i64
 
@@ -385,7 +385,7 @@ contains
         real(kind=dp) :: u, v, w
         n = size(x, kind=i64)
         if (n <= dp_vec_len) then
-            call isort2_dp_i64(x, xi)
+            call isort(x, xi)
         else
             u = x(1_i64)
             v = x(n/2_i64)
@@ -422,8 +422,8 @@ contains
             uxi = xi(ii)
             xi(ii) = xi(1_i64)
             xi(1_i64) = uxi
-            call qsort2_dp_i64(x(1_i64:ii-1_i64), xi(1_i64:ii-1_i64))
-            call qsort2_dp_i64(x(ii+1_i64:n), xi(ii+1_i64:n))
+            call sort(x(1_i64:ii-1_i64), xi(1_i64:ii-1_i64))
+            call sort(x(ii+1_i64:n), xi(ii+1_i64:n))
         end if
     end subroutine qsort2_dp_i64
 

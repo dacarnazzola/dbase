@@ -8,6 +8,7 @@ set(MODULE_FILES
     statistics.f90
     sorting.f90
     vector_math.f90
+    array_utils.f90
    )
 
 # compile module source code files to lib_modules
