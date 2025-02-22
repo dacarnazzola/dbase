@@ -11,6 +11,17 @@ private
         module procedure :: is_sorted_dp
     end interface is_sorted
 
+    interface isort
+        module procedure :: isort_i32
+        module procedure :: isort_i64
+        module procedure :: isort_sp
+        module procedure :: isort_dp
+        module procedure :: isort2_i32_i64
+        module procedure :: isort2_i64_i64
+        module procedure :: isort2_sp_i64
+        module procedure :: isort2_dp_i64
+    end interface isort
+
     interface sort
         module procedure :: qsort_i32
         module procedure :: qsort_i64

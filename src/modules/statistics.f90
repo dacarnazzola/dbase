@@ -190,24 +190,40 @@ contains
 
     pure subroutine normalize_inplace_sp(x)
         real(kind=sp), intent(inout) :: x(:)
-        x = x/dsum(x)
+        real(kind=sp) :: total
+        total = dsum(x)
+        call debug_error_condition(nearly(total, 0.0_sp), &
+                                   'module STATISTICS :: normalize subroutine invalid for input with total == 0.0')
+        x = x/total
     end subroutine normalize_inplace_sp
 
     pure subroutine normalize_sp(x, xnorm)
         real(kind=sp), intent(in) :: x(:)
         real(kind=sp), intent(out) :: xnorm(size(x, kind=i64))
-        xnorm = x/dsum(x)
+        real(kind=sp) :: total
+        total = dsum(x)
+        call debug_error_condition(nearly(total, 0.0_sp), &
+                                   'module STATISTICS :: normalize subroutine invalid for input with total == 0.0')
+        xnorm = x/total
     end subroutine normalize_sp
 
     pure subroutine normalize_inplace_dp(x)
         real(kind=dp), intent(inout) :: x(:)
-        x = x/dsum(x)
+        real(kind=dp) :: total
+        total = dsum(x)
+        call debug_error_condition(nearly(total, 0.0_dp), &
+                                   'module STATISTICS :: normalize subroutine invalid for input with total == 0.0')
+        x = x/total
     end subroutine normalize_inplace_dp
 
     pure subroutine normalize_dp(x, xnorm)
         real(kind=dp), intent(in) :: x(:)
         real(kind=dp), intent(out) :: xnorm(size(x, kind=i64))
-        xnorm = x/dsum(x)
+        real(kind=dp) :: total
+        total = dsum(x)
+        call debug_error_condition(nearly(total, 0.0_dp), &
+                                   'module STATISTICS :: normalize subroutine invalid for input with total == 0.0')
+        xnorm = x/total
     end subroutine normalize_dp
 
     pure subroutine cumsum_i32(x, xcs)
