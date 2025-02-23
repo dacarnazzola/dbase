@@ -17,9 +17,15 @@ private
     real(kind=sp), parameter :: pi_sp = acos(-1.0_sp)
     real(kind=dp), parameter :: pi_dp = acos(-1.0_dp)
 
+    real(kind=sp), parameter :: deg2rad_sp = pi_sp/180.0_sp
+    real(kind=dp), parameter :: deg2rad_dp = pi_dp/180.0_dp
+    real(kind=sp), parameter :: rad2deg_sp = 180.0_sp/pi_sp
+    real(kind=dp), parameter :: rad2deg_dp = 180.0_dp/pi_dp
+
     real(kind=sp), parameter :: twopi_sp = 2.0_sp*acos(-1.0_sp)
     real(kind=dp), parameter :: twopi_dp = 2.0_dp*acos(-1.0_dp)
 
-    public :: debug, pi_sp, pi_dp, i32_vec_len, i64_vec_len, sp_vec_len, dp_vec_len, twopi_sp, twopi_dp
+    public :: debug, pi_sp, pi_dp, i32_vec_len, i64_vec_len, sp_vec_len, dp_vec_len, twopi_sp, twopi_dp, &
+              deg2rad_sp, deg2rad_dp, rad2deg_sp, rad2deg_dp
 
 end module constants
