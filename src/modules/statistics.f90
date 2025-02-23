@@ -283,16 +283,16 @@ contains
         real(kind=sp), intent(out) :: vals(:)
         integer(kind=i64), intent(in) :: d
         real(kind=sp), intent(in) :: x(d,size(vals, kind=i64)), mu(d), sig_diag(d)
-        real(kind=sp) :: factor, dx2(d), sig_inv(d), sig_det
+        real(kind=sp) :: factor, dx2(d), var_inv(d), var_det
         integer(kind=i64) :: i
         call debug_error_condition(logical(any(sig_diag <= 0.0_sp), kind=c_bool), &
                                    'module STATISTICS :: mv_normal_pdf subroutine invalid for input with det(sig) <= 0.0')
-        sig_det = prod(sig_diag)
-        factor = 1.0_sp/sqrt(twopi_sp**d*sig_det)
-        sig_inv = 1.0_sp/sig_diag
+        var_det = prod(sig_diag**2_i64)
+        factor = 1.0_sp/sqrt(twopi_sp**d*var_det)
+        var_inv = 1.0_sp/sig_diag**2_i64
         do i=1_i64,size(vals, kind=i64)
             dx2 = (x(:,i) - mu)**2_i64
-            vals(i) = exp(-0.5_sp*dsum(dx2*sig_inv))
+            vals(i) = exp(-0.5_sp*dsum(dx2*var_inv))
         end do
     end subroutine normal_pdf_diagonal_covariance_sp
 
@@ -300,16 +300,16 @@ contains
         real(kind=dp), intent(out) :: vals(:)
         integer(kind=i64), intent(in) :: d
         real(kind=dp), intent(in) :: x(d,size(vals, kind=i64)), mu(d), sig_diag(d)
-        real(kind=dp) :: factor, dx2(d), sig_inv(d), sig_det
+        real(kind=dp) :: factor, dx2(d), var_inv(d), var_det
         integer(kind=i64) :: i
         call debug_error_condition(logical(any(sig_diag <= 0.0_dp), kind=c_bool), &
                                    'module STATISTICS :: mv_normal_pdf subroutine invalid for input with det(sig) <= 0.0')
-        sig_det = prod(sig_diag)
-        factor = 1.0_dp/sqrt(twopi_dp**d*sig_det)
-        sig_inv = 1.0_dp/sig_diag
+        var_det = prod(sig_diag**2_i64)
+        factor = 1.0_dp/sqrt(twopi_dp**d*var_det)
+        var_inv = 1.0_dp/sig_diag**2_i64
         do i=1_i64,size(vals, kind=i64)
             dx2 = (x(:,i) - mu)**2_i64
-            vals(i) = factor*exp(-0.5_dp*dsum(dx2*sig_inv))
+            vals(i) = factor*exp(-0.5_dp*dsum(dx2*var_inv))
         end do
     end subroutine normal_pdf_diagonal_covariance_dp
 
