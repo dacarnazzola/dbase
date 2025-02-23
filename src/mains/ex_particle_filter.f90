@@ -2,7 +2,7 @@ module pf
 use, non_intrinsic :: kinds, only: stdout, i64, dp, c_bool
 use, non_intrinsic :: constants, only: twopi_dp, deg2rad_dp
 use, non_intrinsic :: random, only: random_uniform, random_normal
-use, non_intrinsic :: vector_math, only: vmag2, vunit2, vdot
+use, non_intrinsic :: vector_math, only: vmag, vunit, vdot
 implicit none
 
     real(kind=dp), parameter :: min_range = 1.0_dp, max_range = 300.0_dp*6076.0_dp, &
@@ -19,7 +19,7 @@ contains
         real(kind=dp) :: dx(2), dvx(2), dxhat(2)
         dx = tgt_state(1:2) - obs_state(1:2)
         if (obs_dim_mask(1)) then !! measurement includes range
-            meas(1) = vmag2(dx)
+            meas(1) = vmag(dx)
         else
             meas(1) = -1.0_dp
         end if
@@ -29,7 +29,7 @@ contains
             meas(2) = -1.0_dp
         end if
         dvx = tgt_state(3:4) - obs_state(3:4)
-        call vunit2(dx, dxhat)
+        call vunit(dx, dxhat)
         if (obs_dim_mask(3)) then !! measurement includes range-rate
             meas(3) = vdot(dvx, dxhat)
         else
@@ -66,7 +66,7 @@ contains
         particles(:,2) = rand_range*sin(rand_angle)
         do i=1_i64,num_particles
             los_obs2tgt = particles(i,1:2) - obs_state(1:2)
-            call vunit2(los_obs2tgt)
+            call vunit(los_obs2tgt)
             particles(i,3:4) = rand_range_rate(i)*los_obs2tgt
         end do
         particles(:,5:6) = 0.0_dp !! initialize with 0.0 acceleration

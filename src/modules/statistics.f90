@@ -12,6 +12,13 @@ private
         module procedure :: dsum_dp
     end interface dsum
 
+    interface prod
+        module procedure :: prod_i32
+        module procedure :: prod_i64
+        module procedure :: prod_sp
+        module procedure :: prod_dp
+    end interface prod
+
     interface avg
         module procedure :: avg_sp
         module procedure :: avg_dp
@@ -23,8 +30,8 @@ private
     end interface std
 
     interface normal_pdf
-        module procedure :: normal_pdf_sp
-        module procedure :: normal_pdf_dp
+        module procedure :: normal_pdf_1d_sp
+        module procedure :: normal_pdf_1d_dp
     end interface normal_pdf
 
     interface normalize
@@ -45,7 +52,7 @@ private
         module procedure :: cumsum_inplace_dp
     end interface cumsum
 
-    public :: dsum, avg, std, normal_pdf, normalize, cumsum
+    public :: dsum, avg, std, normal_pdf, normalize, cumsum, prod
 
 contains
 
@@ -128,6 +135,85 @@ contains
         end if
     end function dsum_dp
 
+    pure function prod_i32(x) result(val)
+        integer(kind=i32), intent(in) :: x(:)
+        integer(kind=i32) :: val
+        integer(kind=i32) :: accumulators(i32_vec_len)
+        integer(kind=i64) :: n, i
+        val = 1_i32
+        n = size(x, kind=i64)
+        if (n > 0_i64) then
+            accumulators = 1_i32
+            do i = 1_i64, n - sp_vec_len + 1_i64, sp_vec_len
+                accumulators = accumulators * x(i:i+sp_vec_len-1_i64)
+            end do
+            i = n - (n/sp_vec_len)*sp_vec_len
+            accumulators(1_i64:i) = accumulators(1_i64:i) * x(n-i+1_i64:n)
+            do i = 1_i64, sp_vec_len, 2_i64
+                val = val * accumulators(i) * accumulators(i + 1_i64)
+            end do
+        end if
+    end function prod_i32
+
+    pure function prod_i64(x) result(val)
+        integer(kind=i64), intent(in) :: x(:)
+        integer(kind=i64) :: val
+        integer(kind=i64) :: n, i, accumulators(i64_vec_len)
+        val = 1_i64
+        n = size(x, kind=i64)
+        if (n > 0_i64) then
+            accumulators = 1_i64
+            do i = 1_i64, n - sp_vec_len + 1_i64, sp_vec_len
+                accumulators = accumulators * x(i:i+sp_vec_len-1_i64)
+            end do
+            i = n - (n/sp_vec_len)*sp_vec_len
+            accumulators(1_i64:i) = accumulators(1_i64:i) * x(n-i+1_i64:n)
+            do i = 1_i64, sp_vec_len, 2_i64
+                val = val * accumulators(i) * accumulators(i + 1_i64)
+            end do
+        end if
+    end function prod_i64
+
+    pure function prod_sp(x) result(val)
+        real(kind=sp), intent(in) :: x(:)
+        real(kind=sp) :: val
+        real(kind=sp) :: accumulators(sp_vec_len)
+        integer(kind=i64) :: n, i
+        val = 1.0_sp
+        n = size(x, kind=i64)
+        if (n > 0_i64) then
+            accumulators = 1.0_sp
+            do i = 1_i64, n - sp_vec_len + 1_i64, sp_vec_len
+                accumulators = accumulators * x(i:i+sp_vec_len-1_i64)
+            end do
+            i = n - (n/sp_vec_len)*sp_vec_len
+            accumulators(1_i64:i) = accumulators(1_i64:i) * x(n-i+1_i64:n)
+            do i = 1_i64, sp_vec_len, 2_i64
+                val = val * accumulators(i) * accumulators(i + 1_i64)
+            end do
+        end if
+    end function prod_sp
+
+    pure function prod_dp(x) result(val)
+        real(kind=dp), intent(in) :: x(:)
+        real(kind=dp) :: val
+        real(kind=dp) :: accumulators(dp_vec_len)
+        integer(kind=i64) :: n, i
+        val = 1.0_dp
+        n = size(x, kind=i64)
+        if (n > 0_i64) then
+            accumulators = 1.0_dp
+            do i = 1_i64, n - sp_vec_len + 1_i64, sp_vec_len
+                accumulators = accumulators * x(i:i+sp_vec_len-1_i64)
+            end do
+            i = n - (n/sp_vec_len)*sp_vec_len
+            accumulators(1_i64:i) = accumulators(1_i64:i) * x(n-i+1_i64:n)
+            do i = 1_i64, sp_vec_len, 2_i64
+                val = val * accumulators(i) * accumulators(i + 1_i64)
+            end do
+        end if
+    end function prod_dp
+
     pure function avg_sp(x) result(val)
         real(kind=sp), intent(in) :: x(:)
         real(kind=sp) :: val
@@ -168,7 +254,7 @@ contains
         val = sqrt(dsum((x - avg(x))**2_i32)/real(n - 1_i64, kind=dp))
     end function std_dp
 
-    pure elemental function normal_pdf_sp(x, mu, sig) result(val)
+    pure elemental function normal_pdf_1d_sp(x, mu, sig) result(val)
         real(kind=sp), intent(in) :: x, mu, sig
         real(kind=sp) :: val
         real(kind=sp) :: sig2
@@ -176,9 +262,9 @@ contains
                                    'module STATISTICS :: normal_pdf function invalid for input with sig == 0.0')
         sig2 = sig*sig
         val = exp(-(x - mu)**2_i32/(2.0_sp*sig2))/sqrt(twopi_sp*sig2)
-    end function normal_pdf_sp
+    end function normal_pdf_1d_sp
 
-    pure elemental function normal_pdf_dp(x, mu, sig) result(val)
+    pure elemental function normal_pdf_1d_dp(x, mu, sig) result(val)
         real(kind=dp), intent(in) :: x, mu, sig
         real(kind=dp) :: val
         real(kind=dp) :: sig2
@@ -186,7 +272,7 @@ contains
                                    'module STATISTICS :: normal_pdf function invalid for input with sig == 0.0')
         sig2 = sig*sig
         val = exp(-(x - mu)**2_i32/(2.0_dp*sig2))/sqrt(twopi_dp*sig2)
-    end function normal_pdf_dp
+    end function normal_pdf_1d_dp
 
     pure subroutine normalize_inplace_sp(x)
         real(kind=sp), intent(inout) :: x(:)
