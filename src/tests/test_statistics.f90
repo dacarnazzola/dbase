@@ -1,6 +1,6 @@
 program test_statistics
 use, non_intrinsic :: kinds, only: stdout, i32, i64, sp, dp
-use, non_intrinsic :: statistics, only: dsum, avg, std, normal_pdf, cumsum
+use, non_intrinsic :: statistics, only: dsum, avg, std, normal_pdf, cumsum, mv_normal_pdf, normalize
 use, non_intrinsic :: random, only: random_normal
 use, non_intrinsic :: timing, only: timer, tic, toc, get_elapsed
 implicit none
@@ -10,7 +10,7 @@ implicit none
     integer(kind=i32) :: xi32(n), i, xi232(n)
     integer(kind=i64) :: xi64(n)
     real(kind=sp) :: xsp(n), xsp2(n2), isp, pdfi, pdf_sum, x2sp(n)
-    real(kind=dp) :: xdp(n), xdp2(n2), x2dp(n)
+    real(kind=dp) :: xdp(n), xdp2(n2), x2dp(n), pdfdp(n), xdp3(2,n)
     type(timer) :: bench
 
     write(unit=stdout, fmt='(a,i0,a,i0)') 'TEST_STATISTICS :: ',n,' element arrays initialized to ',val
@@ -43,6 +43,13 @@ implicit none
         write(unit=stdout, fmt='(a,f0.1,a,f0.6)') 'TEST_STATISTICS :: normal_pdf(',isp,', 0.0_sp, 1.0_sp): ',pdfi
     end do
     write(unit=stdout, fmt='(a,f0.6)') 'TEST STATISTICS :: sum of normal_pdf (expect 1.0): ',pdf_sum
+
+    call random_normal(xdp3(1,:), 100.0_dp, 10.0_dp)
+    call random_normal(xdp3(2,:), 30.0_dp, 0.1_dp)
+    call mv_normal_pdf(pdfdp, 2_i64, xdp3, [100.0_dp, 30.0_dp], [10.0_dp, 0.1_dp])
+    call normalize(pdfdp)
+    write(unit=stdout, fmt='(3(a,e22.15))') 'TEST_STATISTICS :: sum of normalized mv-pdf: ',dsum(pdfdp), &
+                                            ', maximum: ',maxval(pdfdp),', minimum: ',minval(pdfdp)
 
     call random_number(xsp)
     xi32 = nint(xsp)

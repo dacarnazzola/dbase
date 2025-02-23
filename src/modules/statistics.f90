@@ -34,6 +34,11 @@ private
         module procedure :: normal_pdf_1d_dp
     end interface normal_pdf
 
+    interface mv_normal_pdf
+        module procedure :: normal_pdf_diagonal_covariance_sp
+        module procedure :: normal_pdf_diagonal_covariance_dp
+    end interface mv_normal_pdf
+
     interface normalize
         module procedure :: normalize_inplace_sp
         module procedure :: normalize_sp
@@ -52,7 +57,7 @@ private
         module procedure :: cumsum_inplace_dp
     end interface cumsum
 
-    public :: dsum, avg, std, normal_pdf, normalize, cumsum, prod
+    public :: dsum, avg, std, normal_pdf, normalize, cumsum, prod, mv_normal_pdf
 
 contains
 
@@ -273,6 +278,40 @@ contains
         sig2 = sig*sig
         val = exp(-(x - mu)**2_i32/(2.0_dp*sig2))/sqrt(twopi_dp*sig2)
     end function normal_pdf_1d_dp
+
+    pure subroutine normal_pdf_diagonal_covariance_sp(vals, d, x, mu, sig_diag)
+        real(kind=sp), intent(out) :: vals(:)
+        integer(kind=i64), intent(in) :: d
+        real(kind=sp), intent(in) :: x(d,size(vals, kind=i64)), mu(d), sig_diag(d)
+        real(kind=sp) :: factor, dx2(d), sig_inv(d), sig_det
+        integer(kind=i64) :: i
+        sig_det = prod(sig_diag)
+        call debug_error_condition(logical(sig_det <= 0.0_sp, kind=c_bool), &
+                                   'module STATISTICS :: mv_normal_pdf subroutine invalid for input with det(sig) <= 0.0')
+        factor = 1.0_sp/twopi_sp**(real(d, kind=sp)/2.0_sp)*sqrt(sig_det)
+        sig_inv = 1.0_sp/sig_diag
+        do i=1_i64,size(vals, kind=i64)
+            dx2 = (x(:,i) - mu)**2_i64
+            vals(i) = exp(-0.5_sp*dsum(dx2*sig_inv))
+        end do
+    end subroutine normal_pdf_diagonal_covariance_sp
+
+    pure subroutine normal_pdf_diagonal_covariance_dp(vals, d, x, mu, sig_diag)
+        real(kind=dp), intent(out) :: vals(:)
+        integer(kind=i64), intent(in) :: d
+        real(kind=dp), intent(in) :: x(d,size(vals, kind=i64)), mu(d), sig_diag(d)
+        real(kind=dp) :: factor, dx2(d), sig_inv(d), sig_det
+        integer(kind=i64) :: i
+        sig_det = prod(sig_diag)
+        call debug_error_condition(logical(sig_det <= 0.0_sp, kind=c_bool), &
+                                   'module STATISTICS :: mv_normal_pdf subroutine invalid for input with det(sig) <= 0.0')
+        factor = 1.0_dp/twopi_dp**(real(d, kind=dp)/2.0_dp)*sqrt(sig_det)
+        sig_inv = 1.0_dp/sig_diag
+        do i=1_i64,size(vals, kind=i64)
+            dx2 = (x(:,i) - mu)**2_i64
+            vals(i) = factor*exp(-0.5_dp*dsum(dx2*sig_inv))
+        end do
+    end subroutine normal_pdf_diagonal_covariance_dp
 
     pure subroutine normalize_inplace_sp(x)
         real(kind=sp), intent(inout) :: x(:)
