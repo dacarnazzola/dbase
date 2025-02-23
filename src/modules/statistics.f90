@@ -263,7 +263,7 @@ contains
         real(kind=sp), intent(in) :: x, mu, sig
         real(kind=sp) :: val
         real(kind=sp) :: sig2
-        call debug_error_condition(nearly(sig, 0.0_sp), &
+        call debug_error_condition(sig <= 0.0_sp, &
                                    'module STATISTICS :: normal_pdf function invalid for input with sig == 0.0')
         sig2 = sig*sig
         val = exp(-(x - mu)**2_i32/(2.0_sp*sig2))/sqrt(twopi_sp*sig2)
@@ -273,7 +273,7 @@ contains
         real(kind=dp), intent(in) :: x, mu, sig
         real(kind=dp) :: val
         real(kind=dp) :: sig2
-        call debug_error_condition(nearly(sig, 0.0_dp), &
+        call debug_error_condition(sig <= 0.0_dp, &
                                    'module STATISTICS :: normal_pdf function invalid for input with sig == 0.0')
         sig2 = sig*sig
         val = exp(-(x - mu)**2_i32/(2.0_dp*sig2))/sqrt(twopi_dp*sig2)
@@ -285,10 +285,10 @@ contains
         real(kind=sp), intent(in) :: x(d,size(vals, kind=i64)), mu(d), sig_diag(d)
         real(kind=sp) :: factor, dx2(d), sig_inv(d), sig_det
         integer(kind=i64) :: i
-        sig_det = prod(sig_diag)
-        call debug_error_condition(logical(sig_det <= 0.0_sp, kind=c_bool), &
+        call debug_error_condition(logical(any(sig_diag <= 0.0_sp), kind=c_bool), &
                                    'module STATISTICS :: mv_normal_pdf subroutine invalid for input with det(sig) <= 0.0')
-        factor = 1.0_sp/twopi_sp**(real(d, kind=sp)/2.0_sp)*sqrt(sig_det)
+        sig_det = prod(sig_diag)
+        factor = 1.0_sp/sqrt(twopi_sp**d*sig_det)
         sig_inv = 1.0_sp/sig_diag
         do i=1_i64,size(vals, kind=i64)
             dx2 = (x(:,i) - mu)**2_i64
@@ -302,10 +302,10 @@ contains
         real(kind=dp), intent(in) :: x(d,size(vals, kind=i64)), mu(d), sig_diag(d)
         real(kind=dp) :: factor, dx2(d), sig_inv(d), sig_det
         integer(kind=i64) :: i
-        sig_det = prod(sig_diag)
-        call debug_error_condition(logical(sig_det <= 0.0_sp, kind=c_bool), &
+        call debug_error_condition(logical(any(sig_diag <= 0.0_dp), kind=c_bool), &
                                    'module STATISTICS :: mv_normal_pdf subroutine invalid for input with det(sig) <= 0.0')
-        factor = 1.0_dp/twopi_dp**(real(d, kind=dp)/2.0_dp)*sqrt(sig_det)
+        sig_det = prod(sig_diag)
+        factor = 1.0_dp/sqrt(twopi_sp**d*sig_det)
         sig_inv = 1.0_dp/sig_diag
         do i=1_i64,size(vals, kind=i64)
             dx2 = (x(:,i) - mu)**2_i64
