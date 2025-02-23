@@ -305,7 +305,7 @@ contains
         call debug_error_condition(logical(any(sig_diag <= 0.0_dp), kind=c_bool), &
                                    'module STATISTICS :: mv_normal_pdf subroutine invalid for input with det(sig) <= 0.0')
         sig_det = prod(sig_diag)
-        factor = 1.0_dp/sqrt(twopi_sp**d*sig_det)
+        factor = 1.0_dp/sqrt(twopi_dp**d*sig_det)
         sig_inv = 1.0_dp/sig_diag
         do i=1_i64,size(vals, kind=i64)
             dx2 = (x(:,i) - mu)**2_i64
