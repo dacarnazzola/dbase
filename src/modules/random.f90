@@ -1,6 +1,7 @@
 module random
-use, non_intrinsic :: kinds, only: i32, i64, sp, dp
+use, non_intrinsic :: kinds, only: i32, i64, sp, dp, c_bool
 use, non_intrinsic :: constants, only: twopi_sp, twopi_dp
+use, non_intrinsic :: system, only: debug_error_condition
 implicit none
 private
 
@@ -16,7 +17,12 @@ private
         module procedure :: random_normal_dp
     end interface random_normal
 
-    public :: random_uniform, random_normal
+    interface random_log_uniform
+        module procedure :: random_log_uniform_sp
+        module procedure :: random_log_uniform_dp
+    end interface random_log_uniform
+
+    public :: random_uniform, random_normal, random_log_uniform
 
 contains
 
@@ -77,5 +83,23 @@ contains
         vout(1_i64:(n/2_i64)) = mu + sig*r(1_i64:(n/2_i64))*cos(twopi_dp*u(1_i64:(n/2_i64)))
         vout((n/2_i64+1):n) = mu + sig*r*sin(twopi_dp*u)
     end subroutine random_normal_dp
+
+    impure subroutine random_log_uniform_sp(vout, vmin, vmax)
+        real(kind=sp), intent(out) :: vout(:)
+        real(kind=sp), intent(in) :: vmin, vmax
+        call debug_error_condition(logical((vmin <= 0.0_sp) .or. (vmax <= 0.0_sp), kind=c_bool), &
+                                   'module RANDOM :: subroutine random_log_uniform invalid for vmin<=0 or vmax<=0')
+        call random_number(vout)
+        vout = exp(vout*(log(vmax) - log(vmin)) + log(vmin))
+    end subroutine random_log_uniform_sp
+
+    impure subroutine random_log_uniform_dp(vout, vmin, vmax)
+        real(kind=dp), intent(out) :: vout(:)
+        real(kind=dp), intent(in) :: vmin, vmax
+        call debug_error_condition(logical((vmin <= 0.0_dp) .or. (vmax <= 0.0_dp), kind=c_bool), &
+                                   'module RANDOM :: subroutine random_log_uniform invalid for vmin<=0 or vmax<=0')
+        call random_number(vout)
+        vout = exp(vout*(log(vmax) - log(vmin)) + log(vmin))
+    end subroutine random_log_uniform_dp
 
 end module random

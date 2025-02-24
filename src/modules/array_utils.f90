@@ -19,7 +19,35 @@ private
         module procedure :: flip_c_bool
     end interface flip
 
-    public :: swap, flip
+    interface broadcast_add
+        module procedure :: broadcast_add_i32
+        module procedure :: broadcast_add_i64
+        module procedure :: broadcast_add_sp
+        module procedure :: broadcast_add_dp
+    end interface broadcast_add
+
+    interface broadcast_sub
+        module procedure :: broadcast_sub_i32
+        module procedure :: broadcast_sub_i64
+        module procedure :: broadcast_sub_sp
+        module procedure :: broadcast_sub_dp
+    end interface broadcast_sub
+
+    interface broadcast_mul
+        module procedure :: broadcast_mul_i32
+        module procedure :: broadcast_mul_i64
+        module procedure :: broadcast_mul_sp
+        module procedure :: broadcast_mul_dp
+    end interface broadcast_mul
+
+    interface broadcast_div
+        module procedure :: broadcast_div_i32
+        module procedure :: broadcast_div_i64
+        module procedure :: broadcast_div_sp
+        module procedure :: broadcast_div_dp
+    end interface broadcast_div
+
+    public :: swap, flip, broadcast_add, broadcast_sub, broadcast_mul, broadcast_div
 
 contains
 
@@ -107,5 +135,149 @@ contains
             call swap(x(i), x(n-i+1_i64))
         end do
     end subroutine flip_c_bool
+
+    pure subroutine broadcast_add_i32(arr, x_spread, vals)
+        integer(kind=i32), intent(in) :: arr(:,:), x_spread(size(arr, dim=1, kind=i64))
+        integer(kind=i32), intent(out) :: vals(size(arr, dim=1, kind=i64),size(arr, dim=2, kind=i64))
+        integer(kind=i64) :: i
+        do concurrent (i=1_i64:size(arr, dim=2, kind=i64))
+            vals(:,i) = arr(:,i) + x_spread
+        end do
+    end subroutine broadcast_add_i32
+
+    pure subroutine broadcast_add_i64(arr, x_spread, vals)
+        integer(kind=i64), intent(in) :: arr(:,:), x_spread(size(arr, dim=1, kind=i64))
+        integer(kind=i64), intent(out) :: vals(size(arr, dim=1, kind=i64),size(arr, dim=2, kind=i64))
+        integer(kind=i64) :: i
+        do concurrent (i=1_i64:size(arr, dim=2, kind=i64))
+            vals(:,i) = arr(:,i) + x_spread
+        end do
+    end subroutine broadcast_add_i64
+
+    pure subroutine broadcast_add_sp(arr, x_spread, vals)
+        real(kind=sp), intent(in) :: arr(:,:), x_spread(size(arr, dim=1, kind=i64))
+        real(kind=sp), intent(out) :: vals(size(arr, dim=1, kind=i64),size(arr, dim=2, kind=i64))
+        integer(kind=i64) :: i
+        do concurrent (i=1_i64:size(arr, dim=2, kind=i64))
+            vals(:,i) = arr(:,i) + x_spread
+        end do
+    end subroutine broadcast_add_sp
+
+    pure subroutine broadcast_add_dp(arr, x_spread, vals)
+        real(kind=dp), intent(in) :: arr(:,:), x_spread(size(arr, dim=1, kind=i64))
+        real(kind=dp), intent(out) :: vals(size(arr, dim=1, kind=i64),size(arr, dim=2, kind=i64))
+        integer(kind=i64) :: i
+        do concurrent (i=1_i64:size(arr, dim=2, kind=i64))
+            vals(:,i) = arr(:,i) + x_spread
+        end do
+    end subroutine broadcast_add_dp
+
+    pure subroutine broadcast_sub_i32(arr, x_spread, vals)
+        integer(kind=i32), intent(in) :: arr(:,:), x_spread(size(arr, dim=1, kind=i64))
+        integer(kind=i32), intent(out) :: vals(size(arr, dim=1, kind=i64),size(arr, dim=2, kind=i64))
+        integer(kind=i64) :: i
+        do concurrent (i=1_i64:size(arr, dim=2, kind=i64))
+            vals(:,i) = arr(:,i) - x_spread
+        end do
+    end subroutine broadcast_sub_i32
+
+    pure subroutine broadcast_sub_i64(arr, x_spread, vals)
+        integer(kind=i64), intent(in) :: arr(:,:), x_spread(size(arr, dim=1, kind=i64))
+        integer(kind=i64), intent(out) :: vals(size(arr, dim=1, kind=i64),size(arr, dim=2, kind=i64))
+        integer(kind=i64) :: i
+        do concurrent (i=1_i64:size(arr, dim=2, kind=i64))
+            vals(:,i) = arr(:,i) - x_spread
+        end do
+    end subroutine broadcast_sub_i64
+
+    pure subroutine broadcast_sub_sp(arr, x_spread, vals)
+        real(kind=sp), intent(in) :: arr(:,:), x_spread(size(arr, dim=1, kind=i64))
+        real(kind=sp), intent(out) :: vals(size(arr, dim=1, kind=i64),size(arr, dim=2, kind=i64))
+        integer(kind=i64) :: i
+        do concurrent (i=1_i64:size(arr, dim=2, kind=i64))
+            vals(:,i) = arr(:,i) - x_spread
+        end do
+    end subroutine broadcast_sub_sp
+
+    pure subroutine broadcast_sub_dp(arr, x_spread, vals)
+        real(kind=dp), intent(in) :: arr(:,:), x_spread(size(arr, dim=1, kind=i64))
+        real(kind=dp), intent(out) :: vals(size(arr, dim=1, kind=i64),size(arr, dim=2, kind=i64))
+        integer(kind=i64) :: i
+        do concurrent (i=1_i64:size(arr, dim=2, kind=i64))
+            vals(:,i) = arr(:,i) - x_spread
+        end do
+    end subroutine broadcast_sub_dp
+
+    pure subroutine broadcast_mul_i32(arr, x_spread, vals)
+        integer(kind=i32), intent(in) :: arr(:,:), x_spread(size(arr, dim=1, kind=i64))
+        integer(kind=i32), intent(out) :: vals(size(arr, dim=1, kind=i64),size(arr, dim=2, kind=i64))
+        integer(kind=i64) :: i
+        do concurrent (i=1_i64:size(arr, dim=2, kind=i64))
+            vals(:,i) = arr(:,i)*x_spread
+        end do
+    end subroutine broadcast_mul_i32
+
+    pure subroutine broadcast_mul_i64(arr, x_spread, vals)
+        integer(kind=i64), intent(in) :: arr(:,:), x_spread(size(arr, dim=1, kind=i64))
+        integer(kind=i64), intent(out) :: vals(size(arr, dim=1, kind=i64),size(arr, dim=2, kind=i64))
+        integer(kind=i64) :: i
+        do concurrent (i=1_i64:size(arr, dim=2, kind=i64))
+            vals(:,i) = arr(:,i)*x_spread
+        end do
+    end subroutine broadcast_mul_i64
+
+    pure subroutine broadcast_mul_sp(arr, x_spread, vals)
+        real(kind=sp), intent(in) :: arr(:,:), x_spread(size(arr, dim=1, kind=i64))
+        real(kind=sp), intent(out) :: vals(size(arr, dim=1, kind=i64),size(arr, dim=2, kind=i64))
+        integer(kind=i64) :: i
+        do concurrent (i=1_i64:size(arr, dim=2, kind=i64))
+            vals(:,i) = arr(:,i)*x_spread
+        end do
+    end subroutine broadcast_mul_sp
+
+    pure subroutine broadcast_mul_dp(arr, x_spread, vals)
+        real(kind=dp), intent(in) :: arr(:,:), x_spread(size(arr, dim=1, kind=i64))
+        real(kind=dp), intent(out) :: vals(size(arr, dim=1, kind=i64),size(arr, dim=2, kind=i64))
+        integer(kind=i64) :: i
+        do concurrent (i=1_i64:size(arr, dim=2, kind=i64))
+            vals(:,i) = arr(:,i)*x_spread
+        end do
+    end subroutine broadcast_mul_dp
+
+    pure subroutine broadcast_div_i32(arr, x_spread, vals)
+        integer(kind=i32), intent(in) :: arr(:,:), x_spread(size(arr, dim=1, kind=i64))
+        integer(kind=i32), intent(out) :: vals(size(arr, dim=1, kind=i64),size(arr, dim=2, kind=i64))
+        integer(kind=i64) :: i
+        do concurrent (i=1_i64:size(arr, dim=2, kind=i64))
+            vals(:,i) = arr(:,i)/x_spread
+        end do
+    end subroutine broadcast_div_i32
+
+    pure subroutine broadcast_div_i64(arr, x_spread, vals)
+        integer(kind=i64), intent(in) :: arr(:,:), x_spread(size(arr, dim=1, kind=i64))
+        integer(kind=i64), intent(out) :: vals(size(arr, dim=1, kind=i64),size(arr, dim=2, kind=i64))
+        integer(kind=i64) :: i
+        do concurrent (i=1_i64:size(arr, dim=2, kind=i64))
+            vals(:,i) = arr(:,i)/x_spread
+        end do
+    end subroutine broadcast_div_i64
+
+    pure subroutine broadcast_div_sp(arr, x_spread, vals)
+        real(kind=sp), intent(in) :: arr(:,:), x_spread(size(arr, dim=1, kind=i64))
+        real(kind=sp), intent(out) :: vals(size(arr, dim=1, kind=i64),size(arr, dim=2, kind=i64))
+        integer(kind=i64) :: i
+        do concurrent (i=1_i64:size(arr, dim=2, kind=i64))
+            vals(:,i) = arr(:,i)/x_spread
+        end do
+    end subroutine broadcast_div_sp
+
+    pure subroutine broadcast_div_dp(arr, x_spread, vals)
+        real(kind=dp), intent(in) :: arr(:,:), x_spread(size(arr, dim=1, kind=i64))
+        real(kind=dp), intent(out) :: vals(size(arr, dim=1, kind=i64),size(arr, dim=2, kind=i64))
+        integer(kind=i64) :: i
+        do concurrent (i=1_i64:size(arr, dim=2, kind=i64))
+            vals(:,i) = arr(:,i)/x_spread
+        end do
+    end subroutine broadcast_div_dp
 
 end module array_utils
