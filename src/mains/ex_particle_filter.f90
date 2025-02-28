@@ -2,7 +2,7 @@ module pf
 use, non_intrinsic :: kinds, only: dp
 use, non_intrinsic :: constants, only: pi_dp, twopi_dp, deg2rad_dp, rad2deg_dp
 use, non_intrinsic :: random, only: random_normal, random_uniform
-use, non_intrinsic :: statistics, only: avg, std
+use, non_intrinsic :: statistics, only: dsum, avg, std
 implicit none
 private
     
@@ -11,18 +11,28 @@ private
     real(dp), parameter :: ft2nmi = 12.0_dp*2.54_dp/100.0_dp/1852.0_dp
 
     public :: dp, nmi2ft, ft2nmi, deg2rad_dp, rad2deg_dp, &
-              generate_measurements, initialize_particles, convert_particles_cart2pol, &
-              rmse, cart2pol_inner, &
+              perfect_cart2pol, generate_measurements, initialize_particles, convert_particles_cart2pol, &
+              rmse, neff, &
               avg, std
 
 contains
 
-    pure function rmse(predicted, observed) result(val)
-        real(dp), intent(in) :: predicted(:), observed
-        real(dp) :: val
-        real(dp) :: diff2(size(predicted))
-        diff2 = (predicted - observed)**2
-        val = sqrt(avg(diff2))
+    pure subroutine perfect_cart2pol(obs_cart, tgt_cart, tgt_pol)
+        real(dp), intent(in) :: obs_cart(4), tgt_cart(4)
+        real(dp), intent(out) :: tgt_pol(3)
+        call cart2pol_inner(obs_cart, tgt_cart, 0.0_dp, 0.0_dp, 0.0_dp, tgt_pol)
+    end
+
+    pure subroutine cart2pol_inner(obs_cart, tgt_cart, err_rng, err_ang, err_rngrt, tgt_pol)
+        real(dp), intent(in) :: obs_cart(4), tgt_cart(4), err_rng, err_ang, err_rngrt
+        real(dp), intent(out) :: tgt_pol(3)
+        real(dp) :: rng, loshat(2), losv(2)
+        rng = sqrt((tgt_cart(1) - obs_cart(1))**2 + (tgt_cart(2) - obs_cart(2))**2)
+        tgt_pol(1) = max(global_minimum_range, rng + err_rng)
+        loshat = (tgt_cart(1:2) - obs_cart(1:2))/rng
+        tgt_pol(2) = mod(atan2(loshat(2), loshat(1)) + err_ang + pi_dp, twopi_dp) - pi_dp
+        losv = tgt_cart(3:4) - obs_cart(3:4)
+        tgt_pol(3) = losv(1)*loshat(1) + losv(2)*loshat(2) + err_rngrt
     end
 
     impure subroutine generate_measurements(obs_cart, tgt_cart, meas_sig, no_meas_max_rng, no_meas_max_spd, n, polar_measurements)
@@ -55,18 +65,6 @@ contains
         do concurrent (i=1:n)
             call cart2pol_inner(obs_cart, tgt_cart, err_rng(i), err_ang(i), err_rngrt(i), polar_measurements(:,i))
         end do
-    end
-
-    pure subroutine cart2pol_inner(obs_cart, tgt_cart, err_rng, err_ang, err_rngrt, tgt_pol)
-        real(dp), intent(in) :: obs_cart(4), tgt_cart(4), err_rng, err_ang, err_rngrt
-        real(dp), intent(out) :: tgt_pol(3)
-        real(dp) :: rng, loshat(2), losv(2)
-        rng = sqrt((tgt_cart(1) - obs_cart(1))**2 + (tgt_cart(2) - obs_cart(2))**2)
-        tgt_pol(1) = max(global_minimum_range, rng + err_rng)
-        loshat = (tgt_cart(1:2) - obs_cart(1:2))/rng
-        tgt_pol(2) = mod(atan2(loshat(2), loshat(1)) + err_ang + pi_dp, twopi_dp) - pi_dp
-        losv = tgt_cart(3:4) - obs_cart(3:4)
-        tgt_pol(3) = losv(1)*loshat(1) + losv(2)*loshat(2) + err_rngrt
     end
 
     impure subroutine initialize_particles(obs_cart, tgt_cart, meas_sig, tgt_max_rng, tgt_max_spd, n, cartesian_particles)
@@ -112,8 +110,24 @@ contains
         real(dp), intent(out) :: polar_particles(3,n)
         integer :: i
         do concurrent (i=1:n)
-            call cart2pol_inner(obs_cart, cartesian_particles(:,i), 0.0_dp, 0.0_dp, 0.0_dp, polar_particles(:,i))
+            call perfect_cart2pol(obs_cart, cartesian_particles(:,i), polar_particles(:,i))
         end do
+    end
+
+    pure function rmse(predicted, observed) result(val)
+        real(dp), intent(in) :: predicted(:), observed
+        real(dp) :: val
+        real(dp) :: diff2(size(predicted))
+        diff2 = (predicted - observed)**2
+        val = sqrt(avg(diff2))
+    end
+
+    pure function neff(weights) result(val)
+        real(dp), intent(in) :: weights(:)
+        real(dp) :: val
+        real(dp) :: weights2(size(weights))
+        weights2 = weights**2
+        val = 1.0_dp/dsum(weights2)
     end
 
 end module pf
@@ -140,7 +154,7 @@ implicit none
         tgt_cart(2) = 100.0_dp*nmi2ft*sin(real(ang,dp)*deg2rad_dp)
         do spd=900,900
             tgt_cart(3) = -real(spd,dp)
-            call cart2pol_inner(obs_cart, tgt_cart, 0.0_dp, 0.0_dp, 0.0_dp, tgt_pol)
+            call perfect_cart2pol(obs_cart, tgt_cart, tgt_pol)
             do num_particles=10000000,10000000
                 if (allocated(cartesian_particles)) deallocate(cartesian_particles)
                 if (allocated(cart_spd)) deallocate(cart_spd)
@@ -149,7 +163,7 @@ implicit none
                 call initialize_particles(obs_cart, tgt_cart, meas_sig, max_rng, max_spd, num_particles, cartesian_particles)
                 cart_spd = sqrt(sum(cartesian_particles(3:4,:)**2, dim=1))
                 call convert_particles_cart2pol(obs_cart, num_particles, cartesian_particles, polar_particles)
-                write(*,'(5a21)') 'Quantity / ','Truth / ','Particle AVG / ','Particle STD / ','Particle RMSE'
+                write(*,'(5a21)') 'Quantity / ','Truth / ','Particle AVG / ','Particle STD / ','Particle RMSE / '
                 write(*,'(a21,3(f18.4,a3),f18.4)') 'range [NMI]: ',tgt_pol(1)*ft2nmi,' / ', &
                                                                    avg(polar_particles(1,:))*ft2nmi,' / ', &
                                                                    std(polar_particles(1,:))*ft2nmi,' / ', &
