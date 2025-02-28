@@ -70,21 +70,21 @@ contains
     pure subroutine pol2cart_inner(obs_cart, tgt_max_rng, tgt_max_spd, tgt_spd_scale, tgt_pol, tgt_cart)
         real(dp), intent(in) :: obs_cart(4), tgt_max_rng, tgt_max_spd, tgt_spd_scale, tgt_pol(3)
         real(dp), intent(out) :: tgt_cart(4)
-        real(dp) :: cos_ang, sin_ang, tgt_rng, tgt_vr_mag, tgt_spd, tgt_vt_mag, tgt_final_spd_scale
+        real(dp) :: cos_ang, sin_ang, tgt_rng, tgt_min_spd, tgt_spd, tgt_vt_mag
         integer :: tgt_vt_dir
         cos_ang = cos(tgt_pol(2))
         sin_ang = sin(tgt_pol(2))
         tgt_rng = min(tgt_max_rng, tgt_pol(1))
         tgt_cart(1) = obs_cart(1) + tgt_rng*cos_ang
         tgt_cart(2) = obs_cart(2) + tgt_rng*sin_ang
-        tgt_vr_mag = min(tgt_max_spd, abs(tgt_pol(3)))
-        tgt_spd = tgt_spd_scale*(tgt_max_spd - tgt_vr_mag) + tgt_vr_mag
-        tgt_vt_mag = sqrt(max(0.0_dp, tgt_spd**2 - tgt_vr_mag**2))
+        tgt_cart(3) = obs_cart(3) + tgt_pol(3)*cos_ang
+        tgt_cart(4) = obs_cart(4) + tgt_pol(3)*sin_ang
+        tgt_min_spd = min(tgt_max_spd, sqrt(tgt_cart(3)**2 + tgt_cart(4)**2))
+        tgt_spd = tgt_spd_scale*(tgt_max_spd - tgt_min_spd) + tgt_min_spd
+        tgt_vt_mag = sqrt(max(0.0_dp, tgt_spd**2 - tgt_min_spd**2))
         tgt_vt_dir = (-1)**mod(floor(tgt_spd_scale*100000000.0_dp), 2)
-        tgt_cart(3) = obs_cart(3) + tgt_pol(3)*cos_ang - tgt_vt_dir*tgt_vt_mag*sin_ang
-        tgt_cart(4) = obs_cart(4) + tgt_pol(3)*sin_ang + tgt_vt_dir*tgt_vt_mag*cos_ang
-        tgt_final_spd_scale = max(1.0_dp, sqrt(tgt_cart(3)**2 + tgt_cart(4)**2)/tgt_spd)
-        tgt_cart(3:4) = tgt_cart(3:4)/tgt_final_spd_scale
+        tgt_cart(3) = tgt_cart(3) - tgt_vt_dir*tgt_vt_mag*sin_ang
+        tgt_cart(4) = tgt_cart(4) + tgt_vt_dir*tgt_vt_mag*cos_ang
     end
 
 end module pf
