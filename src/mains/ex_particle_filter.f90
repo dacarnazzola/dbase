@@ -19,7 +19,7 @@ contains
         if (meas_sig(1) > 0) then
             call random_normal(err_rng, 0.0_dp, meas_sig(1))
         else
-            true_rng = sqrt((tgt_cart(1) - obs_cart(1))**2 + (tgt_cart(2) - obs_cart(2))**2)
+            true_rng = max(1.0e-6_dp, sqrt((tgt_cart(1) - obs_cart(1))**2 + (tgt_cart(2) - obs_cart(2))**2))
             call random_uniform(err_rng, global_minimum_range - true_rng, no_meas_max_rng - true_rng)
         end if
         if (meas_sig(2) > 0) then
@@ -32,7 +32,8 @@ contains
             call random_normal(err_rngrt, 0.0_dp, meas_sig(3))
         else
             losv = tgt_cart(3:4) - obs_cart(3:4)
-            loshat = (tgt_cart(1:2) - obs_cart(1:2))/sqrt((tgt_cart(1) - obs_cart(1))**2 + (tgt_cart(2) - obs_cart(2))**2)
+            loshat = (tgt_cart(1:2) - obs_cart(1:2)) / &
+                     max(1.0e-6_dp, sqrt((tgt_cart(1) - obs_cart(1))**2 + (tgt_cart(2) - obs_cart(2))**2))
             true_rngrt = losv(1)*loshat(1) + losv(2)*loshat(2)
             call random_uniform(err_rngrt, -no_meas_max_spd - true_rngrt, no_meas_max_spd - true_rngrt)
         end if
@@ -70,7 +71,7 @@ contains
     pure subroutine pol2cart_inner(obs_cart, tgt_max_rng, tgt_max_spd, tgt_spd_scale, tgt_pol, tgt_cart)
         real(dp), intent(in) :: obs_cart(4), tgt_max_rng, tgt_max_spd, tgt_spd_scale, tgt_pol(3)
         real(dp), intent(out) :: tgt_cart(4)
-        real(dp) :: cos_ang, sin_ang, tgt_rng, tgt_min_spd, tgt_spd, tgt_vt_mag
+        real(dp) :: cos_ang, sin_ang, tgt_rng, tgt_min_spd, tgt_spd, tgt_vt_mag, tgt_final_spd_scale
         integer :: tgt_vt_dir
         cos_ang = cos(tgt_pol(2))
         sin_ang = sin(tgt_pol(2))
@@ -85,6 +86,8 @@ contains
         tgt_vt_dir = (-1)**mod(floor(tgt_spd_scale*100000000.0_dp), 2)
         tgt_cart(3) = tgt_cart(3) - tgt_vt_dir*tgt_vt_mag*sin_ang
         tgt_cart(4) = tgt_cart(4) + tgt_vt_dir*tgt_vt_mag*cos_ang
+        tgt_final_spd_scale = max(1.0_dp, sqrt(tgt_cart(3)**2 + tgt_cart(4)**2)/tgt_spd)
+        tgt_cart(3:4) = tgt_cart(3:4)/tgt_final_spd_scale
     end
 
 end module pf
