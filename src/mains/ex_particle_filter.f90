@@ -18,13 +18,13 @@ private
 contains
 
     pure subroutine perfect_cart2pol(obs_cart, tgt_cart, tgt_pol)
-        real(dp), intent(in) :: obs_cart(4), tgt_cart(4)
+        real(dp), intent(in) :: obs_cart(:), tgt_cart(size(obs_cart))
         real(dp), intent(out) :: tgt_pol(3)
         call cart2pol_inner(obs_cart, tgt_cart, 0.0_dp, 0.0_dp, 0.0_dp, tgt_pol)
     end
 
     pure subroutine cart2pol_inner(obs_cart, tgt_cart, err_rng, err_ang, err_rngrt, tgt_pol)
-        real(dp), intent(in) :: obs_cart(4), tgt_cart(4), err_rng, err_ang, err_rngrt
+        real(dp), intent(in) :: obs_cart(:), tgt_cart(size(obs_cart)), err_rng, err_ang, err_rngrt
         real(dp), intent(out) :: tgt_pol(3)
         real(dp) :: rng, loshat(2), losv(2)
         rng = sqrt((tgt_cart(1) - obs_cart(1))**2 + (tgt_cart(2) - obs_cart(2))**2)
@@ -36,7 +36,7 @@ contains
     end
 
     impure subroutine generate_measurements(obs_cart, tgt_cart, meas_sig, no_meas_max_rng, no_meas_max_spd, n, polar_measurements)
-        real(dp), intent(in) :: obs_cart(4), tgt_cart(4), meas_sig(3), no_meas_max_rng, no_meas_max_spd
+        real(dp), intent(in) :: obs_cart(:), tgt_cart(size(obs_cart)), meas_sig(3), no_meas_max_rng, no_meas_max_spd
         integer, intent(in) :: n
         real(dp), intent(out) :: polar_measurements(3,n)
         real(dp) :: err_rng(n), err_ang(n), err_rngrt(n), true_rng, true_ang, losv(2), loshat(2), true_rngrt
@@ -68,9 +68,9 @@ contains
     end
 
     impure subroutine initialize_particles(obs_cart, tgt_cart, meas_sig, tgt_max_rng, tgt_max_spd, n, cartesian_particles)
-        real(dp), intent(in) :: obs_cart(4), tgt_cart(4), meas_sig(3), tgt_max_rng, tgt_max_spd
+        real(dp), intent(in) :: obs_cart(:), tgt_cart(size(obs_cart)), meas_sig(3), tgt_max_rng, tgt_max_spd
         integer, intent(in) :: n
-        real(dp), intent(out) :: cartesian_particles(4,n)
+        real(dp), intent(out) :: cartesian_particles(size(obs_cart),n)
         real(dp) :: polar_measurements(3,n), tgt_spd_scale(n)
         integer :: i
         call generate_measurements(obs_cart, tgt_cart, meas_sig, tgt_max_rng, tgt_max_spd, n, polar_measurements)
@@ -78,12 +78,13 @@ contains
         do concurrent (i=1:n)
             call pol2cart_inner(obs_cart, tgt_max_rng, tgt_max_spd, tgt_spd_scale(i), &
                                 polar_measurements(:,i), cartesian_particles(:,i))
+            if (size(obs_cart) == 6) cartesian_particles(5:6,i) = 0.0_dp
         end do
     end
 
     pure subroutine pol2cart_inner(obs_cart, tgt_max_rng, tgt_max_spd, tgt_spd_scale, tgt_pol, tgt_cart)
-        real(dp), intent(in) :: obs_cart(4), tgt_max_rng, tgt_max_spd, tgt_spd_scale, tgt_pol(3)
-        real(dp), intent(out) :: tgt_cart(4)
+        real(dp), intent(in) :: obs_cart(:), tgt_max_rng, tgt_max_spd, tgt_spd_scale, tgt_pol(3)
+        real(dp), intent(out) :: tgt_cart(size(obs_cart))
         real(dp) :: cos_ang, sin_ang, tgt_rng, tgt_min_spd, tgt_spd, tgt_vt_mag, tgt_final_spd_scale
         integer :: tgt_vt_dir
         cos_ang = cos(tgt_pol(2))
@@ -104,9 +105,9 @@ contains
     end
 
     pure subroutine convert_particles_cart2pol(obs_cart, n, cartesian_particles, polar_particles)
-        real(dp), intent(in) :: obs_cart(4) 
+        real(dp), intent(in) :: obs_cart(:) 
         integer, intent(in) :: n
-        real(dp), intent(in) :: cartesian_particles(4,n)
+        real(dp), intent(in) :: cartesian_particles(size(obs_cart),n)
         real(dp), intent(out) :: polar_particles(3,n)
         integer :: i
         do concurrent (i=1:n)
@@ -139,16 +140,16 @@ implicit none
     
     real(dp), parameter :: max_rng = 500.0_dp*nmi2ft, &
                            max_spd = 10000.0_dp, &
-                           obs_cart(4) = [0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp], &
+                           obs_cart(6) = [0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp], &
                            meas_sig(3) = [10.0_dp*nmi2ft, 1.0_dp*deg2rad_dp, 100.0_dp] ! poor measurements
 !                           meas_sig(3) = [100.0_dp, 0.1_dp*deg2rad_dp, 10.0_dp] ! standard measurements
 !                           meas_sig(3) = [1.0_dp, 0.001_dp, 1.0_dp] ! exquisite measurements
 
     integer :: ang, spd, num_particles        
-    real(dp) :: tgt_cart(4), tgt_pol(3)
+    real(dp) :: tgt_cart(6), tgt_pol(3)
     real(dp), allocatable :: cartesian_particles(:,:), cart_spd(:), polar_particles(:,:)
 
-    tgt_cart(4) = 0.0_dp
+    tgt_cart = 0.0_dp
     do ang=0,90,30
         tgt_cart(1) = 100.0_dp*nmi2ft*cos(real(ang,dp)*deg2rad_dp)
         tgt_cart(2) = 100.0_dp*nmi2ft*sin(real(ang,dp)*deg2rad_dp)
@@ -159,7 +160,9 @@ implicit none
                 if (allocated(cartesian_particles)) deallocate(cartesian_particles)
                 if (allocated(cart_spd)) deallocate(cart_spd)
                 if (allocated(polar_particles)) deallocate(polar_particles)
-                allocate(cartesian_particles(4,num_particles), cart_spd(num_particles), polar_particles(3,num_particles))
+                allocate(cartesian_particles(size(obs_cart),num_particles), &
+                         cart_spd(num_particles), &
+                         polar_particles(3,num_particles))
                 call initialize_particles(obs_cart, tgt_cart, meas_sig, max_rng, max_spd, num_particles, cartesian_particles)
                 cart_spd = sqrt(sum(cartesian_particles(3:4,:)**2, dim=1))
                 call convert_particles_cart2pol(obs_cart, num_particles, cartesian_particles, polar_particles)
