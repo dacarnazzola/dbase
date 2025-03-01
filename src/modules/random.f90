@@ -2,6 +2,7 @@ module random
 use, non_intrinsic :: kinds, only: i32, i64, sp, dp, c_bool
 use, non_intrinsic :: constants, only: twopi_sp, twopi_dp
 use, non_intrinsic :: system, only: debug_error_condition
+use, non_intrinsic :: matrix_math, only: chol
 implicit none
 private
 
@@ -15,6 +16,8 @@ private
     interface random_normal
         module procedure :: random_normal_sp
         module procedure :: random_normal_dp
+        module procedure :: random_multivariable_normal_sp
+        module procedure :: random_multivariable_normal_dp
     end interface random_normal
 
     interface random_log_uniform
@@ -83,6 +86,48 @@ contains
         vout(1_i64:(n/2_i64)) = mu + sig*r(1_i64:(n/2_i64))*cos(twopi_dp*u(1_i64:(n/2_i64)))
         vout((n/2_i64+1):n) = mu + sig*r*sin(twopi_dp*u)
     end subroutine random_normal_dp
+
+    impure subroutine random_multivariable_normal_sp(vout, mu, cov)
+        real(kind=sp), intent(out) :: vout(:,:)
+        real(kind=sp), intent(in) :: mu(:), cov(:,:)
+        integer(kind=i64) :: ndims, nvars, i
+        real(kind=sp) :: cov_L(size(cov, dim=1, kind=i64),size(cov, dim=2, kind=i64)), &
+                         z(size(vout, kind=i64))
+        ndims = size(mu, kind=i64)
+        call debug_error_condition(logical(size(vout, dim=1, kind=i64) /= ndims, kind=c_bool), &
+                                   'module RANDOM :: subroutine random_normal has mismatched ndims between vout and mu')
+        call debug_error_condition(logical(size(cov, dim=1, kind=i64) /= ndims, kind=c_bool), &
+                                   'module RANDOM :: subroutine random_normal has mismatched ndims between cov and mu')
+        call debug_error_condition(logical(size(cov, dim=1, kind=i64) /= size(cov, dim=2, kind=i64), kind=c_bool), &
+                                   'module RANDOM :: subroutine random_normal requires square covariance input (n x n)')
+        nvars = size(vout, dim=2, kind=i64)
+        call chol(cov, cov_L)
+        call random_normal(z, 0.0_sp, 1.0_sp)
+        do concurrent (i=1_i64:nvars)
+            vout(:,i) = mu + matmul(cov_L, z((i-1_i64)*ndims+1_i64:i*ndims))
+        end do
+    end subroutine random_multivariable_normal_sp
+
+    impure subroutine random_multivariable_normal_dp(vout, mu, cov)
+        real(kind=dp), intent(out) :: vout(:,:)
+        real(kind=dp), intent(in) :: mu(:), cov(:,:)
+        integer(kind=i64) :: ndims, nvars, i
+        real(kind=dp) :: cov_L(size(cov, dim=1, kind=i64),size(cov, dim=2, kind=i64)), &
+                         z(size(vout, kind=i64))
+        ndims = size(mu, kind=i64)
+        call debug_error_condition(logical(size(vout, dim=1, kind=i64) /= ndims, kind=c_bool), &
+                                   'module RANDOM :: subroutine random_normal has mismatched ndims between vout and mu')
+        call debug_error_condition(logical(size(cov, dim=1, kind=i64) /= ndims, kind=c_bool), &
+                                   'module RANDOM :: subroutine random_normal has mismatched ndims between cov and mu')
+        call debug_error_condition(logical(size(cov, dim=1, kind=i64) /= size(cov, dim=2, kind=i64), kind=c_bool), &
+                                   'module RANDOM :: subroutine random_normal requires square covariance input (n x n)')
+        nvars = size(vout, dim=2, kind=i64)
+        call chol(cov, cov_L)
+        call random_normal(z, 0.0_dp, 1.0_dp)
+        do concurrent (i=1_i64:nvars)
+            vout(:,i) = mu + matmul(cov_L, z((i-1_i64)*ndims+1_i64:i*ndims))
+        end do
+    end subroutine random_multivariable_normal_dp
 
     impure subroutine random_log_uniform_sp(vout, vmin, vmax)
         real(kind=sp), intent(out) :: vout(:)

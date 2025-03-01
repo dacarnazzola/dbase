@@ -9,7 +9,7 @@ use, non_intrinsic :: matrix_math, only: chol
 implicit none
 private
 
-    logical, parameter :: debug = .true.
+    logical, parameter :: debug = .false.
     
     real(dp), parameter :: global_minimum_range = 1.0_dp
     real(dp), parameter :: nmi2ft = 1852.0_dp*100.0_dp/2.54_dp/12.0_dp
@@ -183,33 +183,40 @@ contains
         weights = inv_n
     end
 
-    impure subroutine apply_roughening(n, particles)
+    impure subroutine apply_roughening(z_scale, n, particles)
+        real(dp), intent(in) :: z_scale
         integer, intent(in) :: n
         real(dp), intent(inout) :: particles(:,:)
         real(dp) :: particles_cov(size(particles,dim=1),size(particles,dim=1)), &
-                    covL(size(particles,dim=1),size(particles,dim=1)), &
-                    reformed_cov(size(particles,dim=1),size(particles,dim=1))
+!                    covL(size(particles,dim=1),size(particles,dim=1)), &
+!                    reformed_cov(size(particles,dim=1),size(particles,dim=1)), &
+                    mu_zero(size(particles,dim=1)), z(size(particles,dim=1),size(particles,dim=2))
         integer :: i
         call debug_error_condition(size(particles, dim=2) /= n, 'mismatch in particles shape')
         call cov(particles, particles_cov)
-        do i=1,size(particles,dim=1)
-            write(*,*) particles_cov(i,:)
+!        do i=1,size(particles,dim=1)
+!            write(*,*) particles_cov(i,:)
+!        end do
+!        do i=1,size(particles,dim=1)
+!            write(*,*) 'sqrt(cov( ',i,',',i,')): ',sqrt(particles_cov(i,i)),', std(input): ',std(particles(i,:))
+!        end do
+!        call chol(particles_cov, covL)
+!        do i=1,size(particles,dim=1)
+!            write(*,*) 'covL row ',i,': ',covL(i,:)
+!        end do
+!        reformed_cov = matmul(covL, transpose(covL))
+!        do i=1,size(particles,dim=1)
+!            write(*,*) 'reformed cov row ',i,': ',reformed_cov(i,:)
+!        end do
+!        do i=1,size(particles,dim=1)
+!            write(*,*) 'diff :',reformed_cov(i,:) - particles_cov(i,:)
+!        end do
+        mu_zero = 0.0_dp
+        call random_normal(z, mu_zero, particles_cov)
+        do concurrent (i=1:n)
+            particles(:,i) = particles(:,i) + z(:,i)*z_scale
         end do
-        do i=1,size(particles,dim=1)
-            write(*,*) 'sqrt(cov( ',i,',',i,')): ',sqrt(particles_cov(i,i)),', std(input): ',std(particles(i,:))
-        end do
-        call chol(particles_cov, covL)
-        do i=1,size(particles,dim=1)
-            write(*,*) 'covL row ',i,': ',covL(i,:)
-        end do
-        reformed_cov = matmul(covL, transpose(covL))
-        do i=1,size(particles,dim=1)
-            write(*,*) 'reformed cov row ',i,': ',reformed_cov(i,:)
-        end do
-        do i=1,size(particles,dim=1)
-            write(*,*) 'diff :',reformed_cov(i,:) - particles_cov(i,:)
-        end do
-        error stop 'halt at roughening step check out cov...'
+!        error stop 'halt at roughening step check out cov...'
     end
 
     pure subroutine fly_constant_acceleration(cart6_state, dt, max_spd)
@@ -337,6 +344,7 @@ implicit none
     real(dp), parameter :: max_rng = 500.0_dp*nmi2ft, &
                            max_spd = 10000.0_dp, &
                            jerk_sig = 0.01_dp*g, &
+                           rough_fac = 1.0_dp/6.0_dp, &
                            dt = 1.0_dp, &
                            meas_sig(3) = [10.0_dp*nmi2ft, 5.0_dp*deg2rad_dp, 200.0_dp] ! poor measurements
 !                           meas_sig(3) = [100.0_dp, 0.1_dp*deg2rad_dp, 10.0_dp] ! standard measurements
@@ -349,7 +357,7 @@ implicit none
 
     do ang=45,45
         do spd=1000,1000
-            do num_particles=100000,100000
+            do num_particles=20000,100000,20000
                 !! reset target for each run
                 obs_cart = 0.0_dp
                 tgt_cart = 0.0_dp !! initialize all state components to zero (0.0)
@@ -401,17 +409,10 @@ implicit none
                     call convert_particles_cart2pol(obs_cart, num_particles, cartesian_particles, polar_particles)
                     call calculate_weights(meas, meas_sig, num_particles, polar_particles, weights)
                     neff_before_resample = neff(weights)
-                    if (neff_before_resample < 0.1_dp*real(num_particles,dp)) then
-                        call resample_systematic(num_particles, cartesian_particles, weights)
+                    if (neff_before_resample < 0.5_dp*real(num_particles,dp)) then
                         msg = 'particles resampled'
-                        call print_summary(msg, t, obs_cart, tgt_cart, num_particles, cartesian_particles, weights)
-                        call apply_roughening(num_particles, cartesian_particles)
-!                        if (neff_before_resample < 0.10_dp*real(num_particles,dp)) then
-!                            call initialize_particles(obs_cart, tgt_cart, meas_sig, max_rng, max_spd, &
-!                                                      num_particles/10, &
-!                                                      cartesian_particles(:,1:num_particles/10), &
-!                                                      weights(1:num_particles/10))
-!                        end if
+                        call resample_systematic(num_particles, cartesian_particles, weights)
+                        call apply_roughening(rough_fac, num_particles, cartesian_particles)
                     else
                         msg = 'tracking update'
                     end if
