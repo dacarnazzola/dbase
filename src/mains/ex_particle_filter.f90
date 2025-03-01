@@ -355,14 +355,14 @@ implicit none
     real(dp), allocatable :: cartesian_particles(:,:), weights(:), polar_particles(:,:)
     character(len=:), allocatable :: msg
 
-    do ang=45,45
-        do spd=1000,1000
-            do num_particles=20000,100000,20000
+    do ang=5,90,5
+        do spd=2000,2000
+            do num_particles=100000,100000
                 !! reset target for each run
                 obs_cart = 0.0_dp
                 tgt_cart = 0.0_dp !! initialize all state components to zero (0.0)
-                tgt_cart(1) = 300.0_dp*nmi2ft*cos(real(ang,dp)*deg2rad_dp) !! x position [ft]
-                tgt_cart(2) = 300.0_dp*nmi2ft*sin(real(ang,dp)*deg2rad_dp) !! y position [ft]
+                tgt_cart(1) = 400.0_dp*nmi2ft*cos(real(ang,dp)*deg2rad_dp) !! x position [ft]
+                tgt_cart(2) = 200000.0_dp ! 300.0_dp*nmi2ft*sin(real(ang,dp)*deg2rad_dp) !! y position [ft]
                 tgt_cart(3) = -real(spd,dp) !! vx velocity [ft/sec]
                 tgt_cart(4) = 1000.0_dp !! vy velocity [ft/sec]
                 tgt_cart(6) = -32.2_dp !! ay acceleration [ft/sec**2]
