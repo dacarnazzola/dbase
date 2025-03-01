@@ -159,7 +159,7 @@ contains
         integer, intent(in) :: n
         real(dp), intent(inout) :: cartesian_particles(:,:), weights(:)
         real(dp) :: weights_cdf(n), u(1), inv_n, new_particles(size(cartesian_particles,dim=1),size(cartesian_particles,dim=2)), &
-                    vx_jitter(n), vy_jitter(n)
+                    vx_sig, vx_jitter(n), vy_sig, vy_jitter(n)
         integer :: i, j
         call debug_error_condition(size(cartesian_particles, dim=2) /= n, 'mismatch in cartesian_particles shape')
         call debug_error_condition(size(weights) /= n, 'size of weights array needs to match n')
@@ -175,12 +175,15 @@ contains
             new_particles(:,i) = cartesian_particles(:,j)
             u = u + inv_n
         end do
-        call random_normal(vx_jitter, 0.0_dp, std(new_particles(3,:))/4.0_dp)
+        vx_sig = std(new_particles(3,:))/6.0_dp
+        call random_normal(vx_jitter, 0.0_dp, vx_sig)
         new_particles(3,:) = new_particles(3,:) + vx_jitter
-        call random_normal(vy_jitter, 0.0_dp, std(new_particles(4,:))/4.0_dp)
+        vy_sig = std(new_particles(4,:))/6.0_dp
+        call random_normal(vy_jitter, 0.0_dp, vy_sig)
         new_particles(4,:) = new_particles(4,:) + vy_jitter
         cartesian_particles = new_particles
         weights = inv_n
+        if (debug) write(*,'(a,f0.1,a,f0.1)') 'resampled with vx_sig: ',vx_sig,' and vy_sig: ',vy_sig
     end
 
     pure subroutine fly_constant_acceleration(cart6_state, dt, max_spd)
@@ -313,11 +316,11 @@ implicit none
 
     do ang=45,45
         do spd=1000,1000
-            do num_particles=20000,100000,20000
+            do num_particles=100000,100004
                 !! reset target for each run
                 tgt_cart = 0.0_dp !! initialize all state components to zero (0.0)
-                tgt_cart(1) = 300.0_dp*nmi2ft*cos(real(ang,dp)*deg2rad_dp) !! x position [ft]
-                tgt_cart(2) = 300.0_dp*nmi2ft*sin(real(ang,dp)*deg2rad_dp) !! y position [ft]
+                tgt_cart(1) = 200.0_dp*nmi2ft*cos(real(ang,dp)*deg2rad_dp) !! x position [ft]
+                tgt_cart(2) = 200.0_dp*nmi2ft*sin(real(ang,dp)*deg2rad_dp) !! y position [ft]
                 tgt_cart(3) = -real(spd,dp) !! vx velocity [ft/sec]
                 tgt_cart(4) = 1000.0_dp !! vy velocity [ft/sec]
                 tgt_cart(6) = -32.2_dp !! ay acceleration [ft/sec**2]
@@ -368,14 +371,14 @@ implicit none
                     call convert_particles_cart2pol(obs_cart, num_particles, cartesian_particles, polar_particles)
                     call calculate_weights(meas, meas_sig, num_particles, polar_particles, weights)
                     neff_before_resample = neff(weights)
-                    if (neff_before_resample < 0.50_dp*real(num_particles,dp)) then
+                    if (neff_before_resample < 0.1_dp*real(num_particles,dp)) then
                         call resample_systematic(num_particles, cartesian_particles, weights)
-                        if (neff_before_resample < 0.10_dp*real(num_particles,dp)) then
-                            call initialize_particles(obs_cart, tgt_cart, meas_sig, max_rng, max_spd, &
-                                                      num_particles/10, &
-                                                      cartesian_particles(:,1:num_particles/10), &
-                                                      weights(1:num_particles/10))
-                        end if
+!                        if (neff_before_resample < 0.10_dp*real(num_particles,dp)) then
+!                            call initialize_particles(obs_cart, tgt_cart, meas_sig, max_rng, max_spd, &
+!                                                      num_particles/10, &
+!                                                      cartesian_particles(:,1:num_particles/10), &
+!                                                      weights(1:num_particles/10))
+!                        end if
                         if (debug) write(*,*) '--> WEIGHTS RESAMPLED'
                     end if
                     if (debug) then
