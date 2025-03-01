@@ -158,7 +158,8 @@ contains
     impure subroutine resample_systematic(n, cartesian_particles, weights)
         integer, intent(in) :: n
         real(dp), intent(inout) :: cartesian_particles(:,:), weights(:)
-        real(dp) :: weights_cdf(n), u(1), inv_n, new_particles(size(cartesian_particles,dim=1),size(cartesian_particles,dim=2))
+        real(dp) :: weights_cdf(n), u(1), inv_n, new_particles(size(cartesian_particles,dim=1),size(cartesian_particles,dim=2)), &
+                    vx_jitter(n), vy_jitter(n)
         integer :: i, j
         call debug_error_condition(size(cartesian_particles, dim=2) /= n, 'mismatch in cartesian_particles shape')
         call debug_error_condition(size(weights) /= n, 'size of weights array needs to match n')
@@ -174,6 +175,10 @@ contains
             new_particles(:,i) = cartesian_particles(:,j)
             u = u + inv_n
         end do
+        call random_normal(vx_jitter, 0.0_dp, std(new_particles(3,:))/4.0_dp)
+        new_particles(3,:) = new_particles(3,:) + vx_jitter
+        call random_normal(vy_jitter, 0.0_dp, std(new_particles(4,:))/4.0_dp)
+        new_particles(4,:) = new_particles(4,:) + vy_jitter
         cartesian_particles = new_particles
         weights = inv_n
     end
@@ -295,10 +300,10 @@ implicit none
     
     real(dp), parameter :: max_rng = 500.0_dp*nmi2ft, &
                            max_spd = 10000.0_dp, &
-                           jerk_sig = 0.1_dp*g, &
+                           jerk_sig = 0.01_dp*g, &
                            obs_cart(6) = [0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp], &
                            dt = 1.0_dp, &
-                           meas_sig(3) = [10.0_dp*nmi2ft, 1.0_dp*deg2rad_dp, 100.0_dp] ! poor measurements
+                           meas_sig(3) = [10.0_dp*nmi2ft, 5.0_dp*deg2rad_dp, 200.0_dp] ! poor measurements
 !                           meas_sig(3) = [100.0_dp, 0.1_dp*deg2rad_dp, 10.0_dp] ! standard measurements
 !                           meas_sig(3) = [1.0_dp, 0.001_dp, 1.0_dp] ! exquisite measurements
 
@@ -308,7 +313,7 @@ implicit none
 
     do ang=15,15,5
         do spd=3000,3000
-            do num_particles=10000000,10000000
+            do num_particles=100000,100000
                 !! reset target for each run
                 tgt_cart = 0.0_dp !! initialize all state components to zero (0.0)
                 tgt_cart(1) = 100.0_dp*nmi2ft*cos(real(ang,dp)*deg2rad_dp) !! x position [ft]
@@ -343,7 +348,7 @@ implicit none
                     call convert_particles_cart2pol(obs_cart, num_particles, cartesian_particles, polar_particles)
                     call calculate_weights(meas, meas_sig, num_particles, polar_particles, weights)
                     !! resample if Neff < 50% of num_particles
-                    if (neff(weights) < 0.5_dp*real(num_particles,dp)) then
+                    if (neff(weights) < 0.1_dp*real(num_particles,dp)) then
                         call resample_systematic(num_particles, cartesian_particles, weights)
                         if (debug) write(*,*) '--> WEIGHTS RESAMPLED'
                     end if
