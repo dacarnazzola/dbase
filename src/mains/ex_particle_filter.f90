@@ -150,7 +150,7 @@ contains
             if (meas_sig(1) > 0) err_fac(1) = (polar_particles(1,i) - tgt_pol(1))**2/meas_sig(1)**2
             if (meas_sig(2) > 0) err_fac(2) = (polar_particles(2,i) - tgt_pol(2))**2/meas_sig(2)**2
             if (meas_sig(3) > 0) err_fac(3) = (polar_particles(3,i) - tgt_pol(3))**2/meas_sig(3)**2
-            weights(i) = weights(i)*exp(-0.5*(err_fac(1) + err_fac(2) + err_fac(3)))
+            weights(i) = weights(i)*exp(-0.5*(err_fac(1) + err_fac(2) + err_fac(3))) + 1.0e-10_dp
         end do
         weights = weights/dsum(weights)
     end
@@ -308,16 +308,16 @@ implicit none
 !                           meas_sig(3) = [1.0_dp, 0.001_dp, 1.0_dp] ! exquisite measurements
 
     integer :: ang, spd, num_particles        
-    real(dp) :: tgt_cart(6), tgt_pol(3), t, meas(3), est_cart(6), pos_err, vel_err, acc_err
+    real(dp) :: tgt_cart(6), tgt_pol(3), t, meas(3), est_cart(6), pos_err, vel_err, acc_err, neff_before_resample
     real(dp), allocatable :: cartesian_particles(:,:), weights(:), polar_particles(:,:)
 
-    do ang=15,15,5
-        do spd=3000,3000
-            do num_particles=100000,100000
+    do ang=45,45
+        do spd=1000,1000
+            do num_particles=20000,100000,20000
                 !! reset target for each run
                 tgt_cart = 0.0_dp !! initialize all state components to zero (0.0)
-                tgt_cart(1) = 100.0_dp*nmi2ft*cos(real(ang,dp)*deg2rad_dp) !! x position [ft]
-                tgt_cart(2) = 100.0_dp*nmi2ft*sin(real(ang,dp)*deg2rad_dp) !! y position [ft]
+                tgt_cart(1) = 300.0_dp*nmi2ft*cos(real(ang,dp)*deg2rad_dp) !! x position [ft]
+                tgt_cart(2) = 300.0_dp*nmi2ft*sin(real(ang,dp)*deg2rad_dp) !! y position [ft]
                 tgt_cart(3) = -real(spd,dp) !! vx velocity [ft/sec]
                 tgt_cart(4) = 1000.0_dp !! vy velocity [ft/sec]
                 tgt_cart(6) = -32.2_dp !! ay acceleration [ft/sec**2]
@@ -330,12 +330,32 @@ implicit none
                          polar_particles(3,num_particles))
                 call initialize_particles(obs_cart, tgt_cart, meas_sig, max_rng, max_spd, &
                                           num_particles, cartesian_particles, weights)
-                call convert_particles_cart2pol(obs_cart, num_particles, cartesian_particles, polar_particles)
-                call calculate_weights(tgt_pol, meas_sig, num_particles, polar_particles, weights)
-                call print_summary('Initialization Complete',obs_cart, tgt_cart, num_particles, cartesian_particles, weights)
-                !! reset weights to 1/num_particles
-                weights = 1.0_dp/real(num_particles,dp)
+                if (debug) then
+                    call convert_particles_cart2pol(obs_cart, num_particles, cartesian_particles, polar_particles)
+                    call calculate_weights(tgt_pol, meas_sig, num_particles, polar_particles, weights)
+                    call print_summary('Initialization Complete',obs_cart, tgt_cart, num_particles, cartesian_particles, weights)
+                    !! reset weights to 1/num_particles
+                    weights = 1.0_dp/real(num_particles,dp)
+                end if
                 t = 0.0_dp
+                write(*,'(i0,a,f0.6,a,3(f0.1," "))') num_particles,' particles with jerk_sig ',jerk_sig, &
+                                                     ' vs target RNG[NMI]/SPD[FT/SEC]/ANG[DEG]: ', &
+                                                     tgt_pol(1)*ft2nmi, &
+                                                     sqrt(tgt_cart(3)**2 + tgt_cart(4)**2), &
+                                                     tgt_pol(2)*rad2deg_dp
+                write(*,'(a,f0.1,a,f0.3,a,f0.3,a,f0.1,a,f0.1,a)') 'MEAS_SIG: ', &                      !! a
+                                                                   meas_sig(1),' ft (', &              !! f0.1,a
+                                                                   meas_sig(1)*ft2nmi,' NMI), ', &     !! f0.3,a
+                                                                   meas_sig(2)*rad2deg_dp,' deg (', &  !! f0.3,a
+                                                                   meas_sig(2)*1000.0_dp,' mrad), ', & !! f0.1,a
+                                                                   meas_sig(3),' ft/sec'               !! f0.1,a
+                write(*,'(7(a,f0.1),a)') '   START TRUTH t: ',t, &
+                                         ' :: x: ',tgt_cart(1)*ft2nmi,' NMI'// &
+                                         ', y: ',tgt_cart(2)*ft2nmi,' NMI'//  &
+                                         ', vx: ',tgt_cart(3),' ft/sec'// &
+                                         ', vy: ',tgt_cart(4),' ft/sec'// &
+                                         ', ax: ',tgt_cart(5),' ft/sec**2'// &
+                                         ', ay: ',tgt_cart(6),' ft/sec**2'
                 do while (tgt_cart(2) > 0.0_dp)
                     !! advance time and target independent of anything else
                     t = t + dt
@@ -347,14 +367,19 @@ implicit none
                     !! convert cartesian particles to polar representation and refine weights accordingly
                     call convert_particles_cart2pol(obs_cart, num_particles, cartesian_particles, polar_particles)
                     call calculate_weights(meas, meas_sig, num_particles, polar_particles, weights)
-                    !! resample if Neff < 50% of num_particles
-                    if (neff(weights) < 0.1_dp*real(num_particles,dp)) then
+                    neff_before_resample = neff(weights)
+                    if (neff_before_resample < 0.50_dp*real(num_particles,dp)) then
                         call resample_systematic(num_particles, cartesian_particles, weights)
+                        if (neff_before_resample < 0.10_dp*real(num_particles,dp)) then
+                            call initialize_particles(obs_cart, tgt_cart, meas_sig, max_rng, max_spd, &
+                                                      num_particles/10, &
+                                                      cartesian_particles(:,1:num_particles/10), &
+                                                      weights(1:num_particles/10))
+                        end if
                         if (debug) write(*,*) '--> WEIGHTS RESAMPLED'
                     end if
                     if (debug) then
-                        call print_summary('tracking update',obs_cart, tgt_cart, num_particles, cartesian_particles, weights)
-                    else
+!                        call print_summary('tracking update',obs_cart, tgt_cart, num_particles, cartesian_particles, weights)
                         call generate_state_estimate(est_cart, num_particles, cartesian_particles, weights)
                         pos_err = sqrt((tgt_cart(1) - est_cart(1))**2 + (tgt_cart(2) - est_cart(2))**2)
                         vel_err = sqrt((tgt_cart(3) - est_cart(3))**2 + (tgt_cart(4) - est_cart(4))**2)
@@ -365,13 +390,7 @@ implicit none
                                                                 ', acc_err: ',acc_err,' ft/sec**2'
                     end if
                 end do
-                write(*,'(a,f0.1,a,f0.3,a,f0.3,a,f0.1,a,f0.1,a)') 'MEAS_SIG: ', &                      !! a
-                                                                   meas_sig(1),' ft (', &              !! f0.1,a
-                                                                   meas_sig(1)*ft2nmi,' NMI), ', &     !! f0.3,a
-                                                                   meas_sig(2)*rad2deg_dp,' deg (', &  !! f0.3,a
-                                                                   meas_sig(2)*1000.0_dp,' mrad), ', & !! f0.1,a
-                                                                   meas_sig(3),' ft/sec'               !! f0.1,a
-                write(*,'(7(a,f0.1),a)') '         TRUTH t: ',t, &
+                write(*,'(7(a,f0.1),a)') '   FINAL TRUTH t: ',t, &
                                          ' :: x: ',tgt_cart(1)*ft2nmi,' NMI'// &
                                          ', y: ',tgt_cart(2)*ft2nmi,' NMI'//  &
                                          ', vx: ',tgt_cart(3),' ft/sec'// &
@@ -393,6 +412,7 @@ implicit none
                                                                      ', pos_err: ',pos_err,' ft'// &
                                                                      ', vel_err: ',vel_err,' ft/sec'// &
                                                                      ', acc_err: ',acc_err,' ft/sec**2'
+                write(*,*) ''
             end do
         end do
     end do
