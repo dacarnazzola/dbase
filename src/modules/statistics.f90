@@ -57,7 +57,12 @@ private
         module procedure :: cumsum_inplace_dp
     end interface cumsum
 
-    public :: dsum, avg, std, normal_pdf, normalize, cumsum, prod, mv_normal_pdf
+    interface cov
+        module procedure :: cov_sp
+        module procedure :: cov_dp
+    end interface cov
+
+    public :: dsum, avg, std, normal_pdf, normalize, cumsum, prod, mv_normal_pdf, cov
 
 contains
 
@@ -246,7 +251,7 @@ contains
         n = size(x, kind=i64)
         call debug_error_condition(logical(n < 2_i64, kind=c_bool), &
                                    'module STATISTICS :: std function invalid for array with length < 2')
-        val = sqrt(dsum((x - avg(x))**2_i32)/real(n - 1_i64, kind=sp))
+        val = sqrt(dsum((x - avg(x))**2)/real(n - 1_i64, kind=sp))
     end function std_sp
 
     pure function std_dp(x) result(val)
@@ -256,7 +261,7 @@ contains
         n = size(x, kind=i64)
         call debug_error_condition(logical(n < 2_i64, kind=c_bool), &
                                    'module STATISTICS :: std function invalid for array with length < 2')
-        val = sqrt(dsum((x - avg(x))**2_i32)/real(n - 1_i64, kind=dp))
+        val = sqrt(dsum((x - avg(x))**2)/real(n - 1_i64, kind=dp))
     end function std_dp
 
     pure elemental function normal_pdf_1d_sp(x, mu, sig) result(val)
@@ -266,7 +271,7 @@ contains
         call debug_error_condition(sig <= 0.0_sp, &
                                    'module STATISTICS :: normal_pdf function invalid for input with sig == 0.0')
         sig2 = sig*sig
-        val = exp(-(x - mu)**2_i32/(2.0_sp*sig2))/sqrt(twopi_sp*sig2)
+        val = exp(-(x - mu)**2/(2.0_sp*sig2))/sqrt(twopi_sp*sig2)
     end function normal_pdf_1d_sp
 
     pure elemental function normal_pdf_1d_dp(x, mu, sig) result(val)
@@ -276,7 +281,7 @@ contains
         call debug_error_condition(sig <= 0.0_dp, &
                                    'module STATISTICS :: normal_pdf function invalid for input with sig == 0.0')
         sig2 = sig*sig
-        val = exp(-(x - mu)**2_i32/(2.0_dp*sig2))/sqrt(twopi_dp*sig2)
+        val = exp(-(x - mu)**2/(2.0_dp*sig2))/sqrt(twopi_dp*sig2)
     end function normal_pdf_1d_dp
 
     pure subroutine normal_pdf_diagonal_covariance_sp(vals, d, x, mu, sig_diag)
@@ -287,11 +292,11 @@ contains
         integer(kind=i64) :: i
         call debug_error_condition(logical(any(sig_diag <= 0.0_sp), kind=c_bool), &
                                    'module STATISTICS :: mv_normal_pdf subroutine invalid for input with det(sig) <= 0.0')
-        var_det = prod(sig_diag**2_i64)
+        var_det = prod(sig_diag**2)
         factor = 1.0_sp/sqrt(twopi_sp**d*var_det)
-        var_inv = 1.0_sp/sig_diag**2_i64
+        var_inv = 1.0_sp/sig_diag**2
         do i=1_i64,size(vals, kind=i64)
-            dx2 = (x(:,i) - mu)**2_i64
+            dx2 = (x(:,i) - mu)**2
             vals(i) = exp(-0.5_sp*dsum(dx2*var_inv))
         end do
     end subroutine normal_pdf_diagonal_covariance_sp
@@ -304,11 +309,11 @@ contains
         integer(kind=i64) :: i
         call debug_error_condition(logical(any(sig_diag <= 0.0_dp), kind=c_bool), &
                                    'module STATISTICS :: mv_normal_pdf subroutine invalid for input with det(sig) <= 0.0')
-        var_det = prod(sig_diag**2_i64)
+        var_det = prod(sig_diag**2)
         factor = 1.0_dp/sqrt(twopi_dp**d*var_det)
-        var_inv = 1.0_dp/sig_diag**2_i64
+        var_inv = 1.0_dp/sig_diag**2
         do i=1_i64,size(vals, kind=i64)
-            dx2 = (x(:,i) - mu)**2_i64
+            dx2 = (x(:,i) - mu)**2
             vals(i) = factor*exp(-0.5_dp*dsum(dx2*var_inv))
         end do
     end subroutine normal_pdf_diagonal_covariance_dp
@@ -452,5 +457,39 @@ contains
             x(i) = x(i-1_i64) + x(i)
         end do
     end subroutine cumsum_inplace_dp
+
+    pure subroutine cov_sp(x, xcov)
+        real(kind=sp), intent(in) :: x(:,:)
+        real(kind=sp), intent(out) :: xcov(size(x, dim=1, kind=i64),size(x, dim=1, kind=i64))
+        integer(kind=i64) :: ndims, i, j
+        real(kind=sp) :: x1_res(size(x, dim=2, kind=i64)), x2_res(size(x, dim=2, kind=i64)), nsamples
+        ndims = size(x, dim=1, kind=i64)
+        nsamples = real(size(x, dim=2, kind=i64), kind=sp)
+        do i=1_i64,ndims
+            x1_res = x(i,:) - avg(x(i,:))
+            do j=i,ndims
+                x2_res = x(j,:) - avg(x(j,:))
+                xcov(j,i) = dsum(x1_res*x2_res)/nsamples
+                if (j /= i) xcov(i,j) = xcov(j,i)
+            end do
+        end do
+    end subroutine cov_sp
+
+    pure subroutine cov_dp(x, xcov)
+        real(kind=dp), intent(in) :: x(:,:)
+        real(kind=dp), intent(out) :: xcov(size(x, dim=1, kind=i64),size(x, dim=1, kind=i64))
+        integer(kind=i64) :: ndims, i, j
+        real(kind=dp) :: x1_res(size(x, dim=2, kind=i64)), x2_res(size(x, dim=2, kind=i64)), nsamples
+        ndims = size(x, dim=1, kind=i64)
+        nsamples = real(size(x, dim=2, kind=i64), kind=dp)
+        do i=1_i64,ndims
+            x1_res = x(i,:) - avg(x(i,:))
+            do j=i,ndims
+                x2_res = x(j,:) - avg(x(j,:))
+                xcov(j,i) = dsum(x1_res*x2_res)/nsamples
+                if (j /= i) xcov(i,j) = xcov(j,i)
+            end do
+        end do
+    end subroutine cov_dp
 
 end module statistics

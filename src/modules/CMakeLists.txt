@@ -10,6 +10,7 @@ set(MODULE_FILES
     vector_math.f90
     array_utils.f90
     math_utils.f90
+    matrix_math.f90
    )
 
 # compile module source code files to lib_modules
