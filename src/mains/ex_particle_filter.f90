@@ -4,6 +4,7 @@ use, non_intrinsic :: constants, only: pi_dp, twopi_dp, deg2rad_dp, rad2deg_dp
 use, non_intrinsic :: random, only: random_normal, random_uniform
 use, non_intrinsic :: statistics, only: dsum, avg, std
 use, non_intrinsic :: vector_math, only: vdot
+use, non_intrinsic :: system, only: debug_error_condition
 implicit none
 private
     
@@ -14,7 +15,8 @@ private
     public :: dp, nmi2ft, ft2nmi, deg2rad_dp, rad2deg_dp, &
               perfect_cart2pol, generate_measurements, initialize_particles, convert_particles_cart2pol, &
               generate_state_estimate, calculate_weights, &
-              rmse, neff, &
+              fly_constant_acceleration, &
+              rmse, neff, print_summary, &
               avg, std
 
 contains
@@ -118,13 +120,13 @@ contains
         end do
     end
 
-    pure subroutine generate_state_estimate(state_estimate, n, cartesian_particles, weights)
+    pure subroutine generate_state_estimate(state_estimate, n, particles, weights)
         real(dp), intent(out) :: state_estimate(:)
         integer, intent(in) :: n
-        real(dp), intent(in) :: cartesian_particles(size(state_estimate),n), weights(n)
+        real(dp), intent(in) :: particles(size(state_estimate),n), weights(n)
         integer :: i
         do concurrent (i=1:size(state_estimate))
-            state_estimate(i) = vdot(cartesian_particles(i,:), weights)
+            state_estimate(i) = vdot(particles(i,:), weights)
         end do
     end
 
@@ -144,6 +146,17 @@ contains
         end do
     end
 
+    pure subroutine fly_constant_acceleration(cart6_state, dt, max_spd)
+        real(dp), intent(inout) :: cart6_state(:)
+        real(dp), intent(in) :: dt, max_spd
+        real(dp) :: spd_scale
+        call debug_error_condition(size(cart6_state) /= 6, 'fly_constant_acceleration assumes state [x, y, vx, vy, ax, ay]')
+        cart6_state(3:4) = cart6_state(3:4) + dt*cart6_state(5:6)
+        spd_scale = max(1.0_dp, sqrt(cart6_state(3)**2 + cart6_state(4)**2)/max_spd)
+        cart6_state(3:4) = cart6_state(3:4)/spd_scale
+        cart6_state(1:2) = cart6_state(1:2) + dt*cart6_state(3:4)
+    end
+
     pure function rmse(predicted, observed) result(val)
         real(dp), intent(in) :: predicted(:), observed
         real(dp) :: val
@@ -160,6 +173,56 @@ contains
         val = 1.0_dp/dsum(weights2)
     end
 
+    impure subroutine print_summary(msg, obs_cart, tgt_cart, n, cartesian_particles, weights)
+        character(len=*), intent(in) :: msg
+        real(dp), intent(in) :: obs_cart(:), tgt_cart(size(obs_cart))
+        integer, intent(in) :: n
+        real(dp), intent(in) :: cartesian_particles(size(obs_cart),n), weights(n)
+        real(dp) :: tgt_pol(3), tgt_spd, cart_spd(n), polar_particles(3,n), est_cart(size(obs_cart)), est_pol(3)
+        call perfect_cart2pol(obs_cart, tgt_cart, tgt_pol)
+        call convert_particles_cart2pol(obs_cart, n, cartesian_particles, polar_particles)
+        call generate_state_estimate(est_cart, n, cartesian_particles, weights)
+        call generate_state_estimate(est_pol, n, polar_particles, weights)
+        tgt_spd = sqrt(tgt_cart(3)**2 + tgt_cart(4)**2)
+        cart_spd = sqrt(sum(cartesian_particles(3:4,:)**2, dim=1))
+        write(*,'(a)') repeat('=', 32)
+        write(*,'(a,f0.1)') msg//' :: Neff: ',neff(weights)
+        write(*,'(5a21)') 'Quantity / ','Truth / ','Particle EST / ','Particle STD / ','Particle RMSE / '
+        write(*,'(a21,3(f18.4,a3),f18.4)') 'range [NMI]: ',tgt_pol(1)*ft2nmi,' / ', &
+                                                           est_pol(1)*ft2nmi,' / ', &
+                                                           std(polar_particles(1,:))*ft2nmi,' / ', &
+                                                           rmse(polar_particles(1,:), tgt_pol(1))*ft2nmi
+        write(*,'(a21,3(f18.4,a3),f18.4)') 'bearing angle [DEG]: ',tgt_pol(2)*rad2deg_dp,' / ', &
+                                                                   est_pol(2)*rad2deg_dp,' / ', &
+                                                                   std(polar_particles(2,:))*rad2deg_dp,' / ', &
+                                                                   rmse(polar_particles(2,:), tgt_pol(2))*rad2deg_dp
+        write(*,'(a21,3(f18.4,a3),f18.4)') 'range-rate [FT/SEC]: ',tgt_pol(3),' / ', &
+                                                                   est_pol(3),' / ', &
+                                                                   std(polar_particles(3,:)),' / ', &
+                                                                   rmse(polar_particles(3,:), tgt_pol(3))
+        write(*,'(a21,3(f18.4,a3),f18.4)') 'x [NMI]: ',tgt_cart(1)*ft2nmi,' / ', &
+                                                       est_cart(1)*ft2nmi,' / ', &
+                                                       std(cartesian_particles(1,:))*ft2nmi,' / ', &
+                                                       rmse(cartesian_particles(1,:), tgt_cart(1))*ft2nmi
+        write(*,'(a21,3(f18.4,a3),f18.4)') 'y [NMI]: ',tgt_cart(2)*ft2nmi,' / ', &
+                                                       est_cart(2)*ft2nmi,' / ', &
+                                                       std(cartesian_particles(2,:))*ft2nmi,' / ', &
+                                                       rmse(cartesian_particles(2,:), tgt_cart(2))*ft2nmi
+        write(*,'(a21,3(f18.4,a3),f18.4)') 'vx [FT/SEC]: ',tgt_cart(3),' / ', &
+                                                           est_cart(3),' / ', &
+                                                           std(cartesian_particles(3,:)),' / ', &
+                                                           rmse(cartesian_particles(3,:), tgt_cart(3))
+        write(*,'(a21,3(f18.4,a3),f18.4)') 'vy [FT/SEC]: ',tgt_cart(4),' / ', &
+                                                           est_cart(4),' / ', &
+                                                           std(cartesian_particles(4,:)),' / ', &
+                                                           rmse(cartesian_particles(4,:), tgt_cart(4))
+        write(*,'(a21,3(f18.4,a3),f18.4)') 'speed [FT/SEC]: ',tgt_spd,' / ', &
+                                                              vdot(cart_spd, weights),' / ', &
+                                                              std(cart_spd),' / ', &
+                                                              rmse(cart_spd, tgt_spd)
+        write(*,'(a)') repeat('=', 32)
+    end
+
 end module pf
 
 
@@ -170,68 +233,45 @@ implicit none
     real(dp), parameter :: max_rng = 500.0_dp*nmi2ft, &
                            max_spd = 10000.0_dp, &
                            obs_cart(6) = [0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp], &
+                           dt = 1.0_dp, &
                            meas_sig(3) = [10.0_dp*nmi2ft, 1.0_dp*deg2rad_dp, 100.0_dp] ! poor measurements
 !                           meas_sig(3) = [100.0_dp, 0.1_dp*deg2rad_dp, 10.0_dp] ! standard measurements
 !                           meas_sig(3) = [1.0_dp, 0.001_dp, 1.0_dp] ! exquisite measurements
 
     integer :: ang, spd, num_particles        
-    real(dp) :: tgt_cart(6), tgt_pol(3)
-    real(dp), allocatable :: cartesian_particles(:,:), weights(:), cart_spd(:), polar_particles(:,:)
+    real(dp) :: tgt_cart(6), t
+    real(dp), allocatable :: cartesian_particles(:,:), weights(:), polar_particles(:,:)
 
-    tgt_cart = 0.0_dp
-    do ang=0,90,30
-        tgt_cart(1) = 100.0_dp*nmi2ft*cos(real(ang,dp)*deg2rad_dp)
-        tgt_cart(2) = 100.0_dp*nmi2ft*sin(real(ang,dp)*deg2rad_dp)
-        do spd=900,900
-            tgt_cart(3) = -real(spd,dp)
-            call perfect_cart2pol(obs_cart, tgt_cart, tgt_pol)
+    tgt_cart = 0.0_dp !! initialize all state components to zero (0.0)
+    do ang=5,15,5
+        tgt_cart(1) = 100.0_dp*nmi2ft*cos(real(ang,dp)*deg2rad_dp) !! x position [ft]
+        tgt_cart(2) = 100.0_dp*nmi2ft*sin(real(ang,dp)*deg2rad_dp) !! y position [ft]
+        do spd=4500,4500
+            tgt_cart(3) = -real(spd,dp) !! vx velocity [ft/sec]
+            tgt_cart(4) = 1000.0_dp !! vy velocity [ft/sec]
+            tgt_cart(6) = -32.2_dp !! ay acceleration [ft/sec**2]
             do num_particles=10000000,10000000
                 if (allocated(cartesian_particles)) deallocate(cartesian_particles)
                 if (allocated(weights)) deallocate(weights)
-                if (allocated(cart_spd)) deallocate(cart_spd)
                 if (allocated(polar_particles)) deallocate(polar_particles)
                 allocate(cartesian_particles(size(obs_cart),num_particles), &
                          weights(num_particles), &
-                         cart_spd(num_particles), &
                          polar_particles(3,num_particles))
                 call initialize_particles(obs_cart, tgt_cart, meas_sig, max_rng, max_spd, &
                                           num_particles, cartesian_particles, weights)
-                cart_spd = sqrt(sum(cartesian_particles(3:4,:)**2, dim=1))
-                call convert_particles_cart2pol(obs_cart, num_particles, cartesian_particles, polar_particles)
-                write(*,'(5a21)') 'Quantity / ','Truth / ','Particle AVG / ','Particle STD / ','Particle RMSE / '
-                write(*,'(a21,3(f18.4,a3),f18.4)') 'range [NMI]: ',tgt_pol(1)*ft2nmi,' / ', &
-                                                                   avg(polar_particles(1,:))*ft2nmi,' / ', &
-                                                                   std(polar_particles(1,:))*ft2nmi,' / ', &
-                                                                   rmse(polar_particles(1,:), tgt_pol(1))*ft2nmi
-                write(*,'(a21,3(f18.4,a3),f18.4)') 'bearing angle [DEG]: ',tgt_pol(2)*rad2deg_dp,' / ', &
-                                                                           avg(polar_particles(2,:))*rad2deg_dp,' / ', &
-                                                                           std(polar_particles(2,:))*rad2deg_dp,' / ', &
-                                                                           rmse(polar_particles(2,:), tgt_pol(2))*rad2deg_dp
-                write(*,'(a21,3(f18.4,a3),f18.4)') 'range-rate [FT/SEC]: ',tgt_pol(3),' / ', &
-                                                                           avg(polar_particles(3,:)),' / ', &
-                                                                           std(polar_particles(3,:)),' / ', &
-                                                                           rmse(polar_particles(3,:), tgt_pol(3))
-                write(*,'(a21,3(f18.4,a3),f18.4)') 'x [NMI]: ',tgt_cart(1)*ft2nmi,' / ', &
-                                                               avg(cartesian_particles(1,:))*ft2nmi,' / ', &
-                                                               std(cartesian_particles(1,:))*ft2nmi,' / ', &
-                                                               rmse(cartesian_particles(1,:), tgt_cart(1))*ft2nmi
-                write(*,'(a21,3(f18.4,a3),f18.4)') 'y [NMI]: ',tgt_cart(2)*ft2nmi,' / ', &
-                                                               avg(cartesian_particles(2,:))*ft2nmi,' / ', &
-                                                               std(cartesian_particles(2,:))*ft2nmi,' / ', &
-                                                               rmse(cartesian_particles(2,:), tgt_cart(2))*ft2nmi
-                write(*,'(a21,3(f18.4,a3),f18.4)') 'vx [FT/SEC]: ',tgt_cart(3),' / ', &
-                                                                   avg(cartesian_particles(3,:)),' / ', &
-                                                                   std(cartesian_particles(3,:)),' / ', &
-                                                                   rmse(cartesian_particles(3,:), tgt_cart(3))
-                write(*,'(a21,3(f18.4,a3),f18.4)') 'vy [FT/SEC]: ',tgt_cart(4),' / ', &
-                                                                   avg(cartesian_particles(4,:)),' / ', &
-                                                                   std(cartesian_particles(4,:)),' / ', &
-                                                                   rmse(cartesian_particles(4,:), tgt_cart(4))
-                write(*,'(a21,3(f18.4,a3),f18.4)') 'speed [FT/SEC]: ',real(spd,dp),' / ', &
-                                                                      avg(cart_spd),' / ', &
-                                                                      std(cart_spd),' / ', &
-                                                                      rmse(cart_spd, real(spd,dp))
-                write(*,'(a)') ''
+                call print_summary('Initialization Complete',obs_cart, tgt_cart, num_particles, cartesian_particles, weights)
+                t = 0.0_dp
+                do while (tgt_cart(2) > 0.0_dp)
+                    t = t + dt
+                    call fly_constant_acceleration(tgt_cart, dt, max_spd)
+                end do
+                write(*,'(7(a,f0.1),a)') 't: ',t, &
+                                         ' :: x: ',tgt_cart(1)*ft2nmi,' NMI'// &
+                                         ', y: ',tgt_cart(2)*ft2nmi,' NMI'//  &
+                                         ', vx: ',tgt_cart(3),' ft/sec'// &
+                                         ', vy: ',tgt_cart(4),' ft/sec'// &
+                                         ', ax: ',tgt_cart(5),' ft/sec**2'// &
+                                         ', ay: ',tgt_cart(6),' ft/sec**2'
             end do
         end do
     end do
