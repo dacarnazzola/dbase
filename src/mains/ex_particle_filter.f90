@@ -19,7 +19,7 @@ private
     public :: debug, dp, nmi2ft, ft2nmi, deg2rad_dp, rad2deg_dp, g, &
               perfect_cart2pol, generate_measurements, initialize_particles, convert_particles_cart2pol, &
               generate_state_estimate, calculate_weights, resample_systematic, apply_roughening, &
-              fly_constant_acceleration, propagate_particles, &
+              fly_constant_acceleration, propagate_particles, apply_constraints, &
               rmse, neff, print_summary, &
               avg, std
 
@@ -188,35 +188,15 @@ contains
         integer, intent(in) :: n
         real(dp), intent(inout) :: particles(:,:)
         real(dp) :: particles_cov(size(particles,dim=1),size(particles,dim=1)), &
-!                    covL(size(particles,dim=1),size(particles,dim=1)), &
-!                    reformed_cov(size(particles,dim=1),size(particles,dim=1)), &
                     mu_zero(size(particles,dim=1)), z(size(particles,dim=1),size(particles,dim=2))
         integer :: i
         call debug_error_condition(size(particles, dim=2) /= n, 'mismatch in particles shape')
         call cov(particles, particles_cov)
-!        do i=1,size(particles,dim=1)
-!            write(*,*) particles_cov(i,:)
-!        end do
-!        do i=1,size(particles,dim=1)
-!            write(*,*) 'sqrt(cov( ',i,',',i,')): ',sqrt(particles_cov(i,i)),', std(input): ',std(particles(i,:))
-!        end do
-!        call chol(particles_cov, covL)
-!        do i=1,size(particles,dim=1)
-!            write(*,*) 'covL row ',i,': ',covL(i,:)
-!        end do
-!        reformed_cov = matmul(covL, transpose(covL))
-!        do i=1,size(particles,dim=1)
-!            write(*,*) 'reformed cov row ',i,': ',reformed_cov(i,:)
-!        end do
-!        do i=1,size(particles,dim=1)
-!            write(*,*) 'diff :',reformed_cov(i,:) - particles_cov(i,:)
-!        end do
         mu_zero = 0.0_dp
         call random_normal(z, mu_zero, particles_cov)
         do concurrent (i=1:n)
             particles(:,i) = particles(:,i) + z(:,i)*z_scale
         end do
-!        error stop 'halt at roughening step check out cov...'
     end
 
     pure subroutine fly_constant_acceleration(cart6_state, dt, max_spd)
@@ -230,11 +210,11 @@ contains
         cart6_state(1:2) = cart6_state(1:2) + dt*cart6_state(3:4)
     end
 
-    impure subroutine propagate_particles(dt, jerk_sig, max_spd, n, cartesian_particles)
-        real(dp), intent(in) :: dt, jerk_sig, max_spd
+    impure subroutine propagate_particles(dt, jerk_sig, max_spd, max_acc, n, cartesian_particles)
+        real(dp), intent(in) :: dt, jerk_sig, max_spd, max_acc
         integer, intent(in) :: n
         real(dp), intent(inout) :: cartesian_particles(:,:)
-        real(dp) :: jx(n), jy(n)
+        real(dp) :: jx(n), jy(n), acc_scale
         integer :: i
         call debug_error_condition(size(cartesian_particles, dim=2) /= n, 'mismatch in cartesian_particles shape')
         call random_normal(jx, 0.0_dp, jerk_sig)
@@ -242,8 +222,35 @@ contains
         do concurrent (i=1:n)
             cartesian_particles(5,i) = cartesian_particles(5,i) + jx(i)
             cartesian_particles(6,i) = cartesian_particles(6,i) + jy(i)
+            acc_scale = max(1.0_dp, sqrt(cartesian_particles(5,i)**2 + cartesian_particles(6,i)**2)/max_acc)
+            cartesian_particles(5:6,i) = cartesian_particles(5:6,i)/acc_scale
             call fly_constant_acceleration(cartesian_particles(:,i), dt, max_spd)
         end do
+    end
+
+    pure subroutine apply_constraints(obs_cart, max_rng, max_spd, max_acc, n, cartesian_particles, polar_particles)
+        real(dp), intent(in) :: obs_cart(:), max_rng, max_spd, max_acc
+        integer, intent(in) :: n
+        real(dp), intent(inout) :: cartesian_particles(:,:)
+        real(dp), intent(out) :: polar_particles(:,:)
+        real(dp) :: los(2), ang, spd_scale, acc_scale
+        integer :: i
+        call debug_error_condition(size(cartesian_particles, dim=1) /= size(obs_cart), 'mismatch in obs_cart vs particle dims')
+        call debug_error_condition(size(cartesian_particles, dim=2) /= n, 'mismatch in cartesian_particles shape')
+        call debug_error_condition(size(polar_particles, dim=2) /= n, 'mismatch in polar_particles shape')
+        do concurrent (i=1:n)
+            los = cartesian_particles(1:2,i) - obs_cart(1:2)
+            if (sqrt(los(1)**2 + los(2)**2) > max_rng) then
+                ang = atan2(los(2), los(1))
+                cartesian_particles(1,i) = obs_cart(1) + max_rng*cos(ang)
+                cartesian_particles(2,i) = obs_cart(2) + max_rng*sin(ang)
+            end if
+            spd_scale = max(1.0_dp, sqrt(cartesian_particles(3,i)**2 + cartesian_particles(4,i)**2)/max_spd)
+            cartesian_particles(3:4,i) = cartesian_particles(3:4,i)/spd_scale
+            acc_scale = max(1.0_dp, sqrt(cartesian_particles(5,i)**2 + cartesian_particles(6,i)**2)/max_acc)
+            cartesian_particles(5:6,i) = cartesian_particles(5:6,i)/acc_scale
+        end do
+        call convert_particles_cart2pol(obs_cart, n, cartesian_particles, polar_particles)
     end
 
     pure function rmse(predicted, observed) result(val)
@@ -341,21 +348,24 @@ program ex_particle_filter
 use, non_intrinsic :: pf
 implicit none
     
-    real(dp), parameter :: max_rng = 500.0_dp*nmi2ft, &
-                           max_spd = 10000.0_dp, &
-                           jerk_sig = 0.01_dp*g, &
+    real(dp), parameter :: max_rng   = 500.0_dp*nmi2ft, &
+                           max_spd   = 10000.0_dp, &
+                           max_acc   = 9.0_dp*g, &
+                           jerk_sig  = 0.01_dp*g, &
                            rough_fac = 1.0_dp/6.0_dp, &
-                           dt = 1.0_dp, &
+                           neff_pass = 0.1_dp, &
+                           dt        = 1.0_dp, &
                            meas_sig(3) = [10.0_dp*nmi2ft, 5.0_dp*deg2rad_dp, 200.0_dp] ! poor measurements
 !                           meas_sig(3) = [100.0_dp, 0.1_dp*deg2rad_dp, 10.0_dp] ! standard measurements
 !                           meas_sig(3) = [1.0_dp, 0.001_dp, 1.0_dp] ! exquisite measurements
+!                           meas_sig(3) = [-1.0_dp, 0.1_dp*deg2rad_dp, -1.0_dp] ! bearing only
 
     integer :: ang, spd, num_particles        
-    real(dp) :: obs_cart(6), tgt_cart(6), tgt_pol(3), t, meas(3), est_cart(6), pos_err, vel_err, acc_err, neff_before_resample
+    real(dp) :: obs_cart(6), tgt_cart(6), tgt_pol(3), t, meas(3), est_cart(6), pos_err, vel_err, acc_err
     real(dp), allocatable :: cartesian_particles(:,:), weights(:), polar_particles(:,:)
     character(len=:), allocatable :: msg
 
-    do ang=5,90,5
+    do ang=5,15,5
         do spd=2000,2000
             do num_particles=100000,100000
                 !! reset target for each run
@@ -396,23 +406,23 @@ implicit none
                                          ', vy: ',tgt_cart(4),' ft/sec'// &
                                          ', ax: ',tgt_cart(5),' ft/sec**2'// &
                                          ', ay: ',tgt_cart(6),' ft/sec**2'
-                do while (tgt_cart(2) > 0.0_dp)
+                do while (t < 120.0_dp)
                     !! advance time and target independent of anything else
                     t = t + dt
-                    call fly_constant_acceleration(tgt_cart, dt, max_spd)
+                    call fly_constant_acceleration(tgt_cart, dt, huge(max_spd))
                     call fly_constant_acceleration(obs_cart, dt, max_spd)
                     !! generate new measurement from observer perspective
                     call generate_measurements(obs_cart, tgt_cart, meas_sig, max_rng, max_spd, 1, meas)
                     !! propagate current particles
-                    call propagate_particles(dt, jerk_sig, max_spd, num_particles, cartesian_particles)
-                    !! convert cartesian particles to polar representation and refine weights accordingly
-                    call convert_particles_cart2pol(obs_cart, num_particles, cartesian_particles, polar_particles)
+                    call propagate_particles(dt, jerk_sig, max_spd, max_acc, num_particles, cartesian_particles)
+                    !! apply constraints and convert particles from cartesian to polar representation
+                    call apply_constraints(obs_cart, max_rng, max_spd, max_acc, num_particles, cartesian_particles, polar_particles)
+                    !! calculate weights, resample if Neff is below neff_pass (acceptable percentage of original num_particles)
                     call calculate_weights(meas, meas_sig, num_particles, polar_particles, weights)
-                    neff_before_resample = neff(weights)
-                    if (neff_before_resample < 0.5_dp*real(num_particles,dp)) then
+                    if (neff(weights) < neff_pass*real(num_particles,dp)) then
                         msg = 'particles resampled'
                         call resample_systematic(num_particles, cartesian_particles, weights)
-                        call apply_roughening(rough_fac, num_particles, cartesian_particles)
+                        call apply_roughening(rough_fac*dt, num_particles, cartesian_particles)
                     else
                         msg = 'tracking update'
                     end if
