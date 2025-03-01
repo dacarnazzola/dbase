@@ -3,6 +3,7 @@ use, non_intrinsic :: kinds, only: dp
 use, non_intrinsic :: constants, only: pi_dp, twopi_dp, deg2rad_dp, rad2deg_dp
 use, non_intrinsic :: random, only: random_normal, random_uniform
 use, non_intrinsic :: statistics, only: dsum, avg, std
+use, non_intrinsic :: vector_math, only: vdot
 implicit none
 private
     
@@ -12,6 +13,7 @@ private
 
     public :: dp, nmi2ft, ft2nmi, deg2rad_dp, rad2deg_dp, &
               perfect_cart2pol, generate_measurements, initialize_particles, convert_particles_cart2pol, &
+              generate_state_estimate, calculate_weights, &
               rmse, neff, &
               avg, std
 
@@ -67,10 +69,10 @@ contains
         end do
     end
 
-    impure subroutine initialize_particles(obs_cart, tgt_cart, meas_sig, tgt_max_rng, tgt_max_spd, n, cartesian_particles)
+    impure subroutine initialize_particles(obs_cart, tgt_cart, meas_sig, tgt_max_rng, tgt_max_spd, n, cartesian_particles, weights)
         real(dp), intent(in) :: obs_cart(:), tgt_cart(size(obs_cart)), meas_sig(3), tgt_max_rng, tgt_max_spd
         integer, intent(in) :: n
-        real(dp), intent(out) :: cartesian_particles(size(obs_cart),n)
+        real(dp), intent(out) :: cartesian_particles(size(obs_cart),n), weights(n)
         real(dp) :: polar_measurements(3,n), tgt_spd_scale(n)
         integer :: i
         call generate_measurements(obs_cart, tgt_cart, meas_sig, tgt_max_rng, tgt_max_spd, n, polar_measurements)
@@ -80,6 +82,7 @@ contains
                                 polar_measurements(:,i), cartesian_particles(:,i))
             if (size(obs_cart) == 6) cartesian_particles(5:6,i) = 0.0_dp
         end do
+        weights = 1.0_dp/real(n,dp)
     end
 
     pure subroutine pol2cart_inner(obs_cart, tgt_max_rng, tgt_max_spd, tgt_spd_scale, tgt_pol, tgt_cart)
@@ -115,6 +118,32 @@ contains
         end do
     end
 
+    pure subroutine generate_state_estimate(state_estimate, n, cartesian_particles, weights)
+        real(dp), intent(out) :: state_estimate(:)
+        integer, intent(in) :: n
+        real(dp), intent(in) :: cartesian_particles(size(state_estimate),n), weights(n)
+        integer :: i
+        do concurrent (i=1:size(state_estimate))
+            state_estimate(i) = vdot(cartesian_particles(i,:), weights)
+        end do
+    end
+
+    pure subroutine calculate_weights(tgt_pol, meas_sig, n, polar_particles, weights)
+        real(dp), intent(in) :: tgt_pol(3), meas_sig(3)
+        integer, intent(in) :: n
+        real(dp), intent(in) :: polar_particles(3,n)
+        real(dp), intent(inout) :: weights(n)
+        real(dp) :: err_fac(3)
+        integer :: i
+        do concurrent (i=1:n)
+            err_fac = 0.0_dp
+            if (meas_sig(1) > 0) err_fac(1) = (polar_particles(1,i) - tgt_pol(1))**2/meas_sig(1)**2
+            if (meas_sig(2) > 0) err_fac(2) = (polar_particles(2,i) - tgt_pol(2))**2/meas_sig(2)**2
+            if (meas_sig(3) > 0) err_fac(3) = (polar_particles(3,i) - tgt_pol(3))**2/meas_sig(3)**2
+            weights(i) = weights(i)*exp(-0.5*(err_fac(1) + err_fac(2) + err_fac(3)))
+        end do
+    end
+
     pure function rmse(predicted, observed) result(val)
         real(dp), intent(in) :: predicted(:), observed
         real(dp) :: val
@@ -147,7 +176,7 @@ implicit none
 
     integer :: ang, spd, num_particles        
     real(dp) :: tgt_cart(6), tgt_pol(3)
-    real(dp), allocatable :: cartesian_particles(:,:), cart_spd(:), polar_particles(:,:)
+    real(dp), allocatable :: cartesian_particles(:,:), weights(:), cart_spd(:), polar_particles(:,:)
 
     tgt_cart = 0.0_dp
     do ang=0,90,30
@@ -158,12 +187,15 @@ implicit none
             call perfect_cart2pol(obs_cart, tgt_cart, tgt_pol)
             do num_particles=10000000,10000000
                 if (allocated(cartesian_particles)) deallocate(cartesian_particles)
+                if (allocated(weights)) deallocate(weights)
                 if (allocated(cart_spd)) deallocate(cart_spd)
                 if (allocated(polar_particles)) deallocate(polar_particles)
                 allocate(cartesian_particles(size(obs_cart),num_particles), &
+                         weights(num_particles), &
                          cart_spd(num_particles), &
                          polar_particles(3,num_particles))
-                call initialize_particles(obs_cart, tgt_cart, meas_sig, max_rng, max_spd, num_particles, cartesian_particles)
+                call initialize_particles(obs_cart, tgt_cart, meas_sig, max_rng, max_spd, &
+                                          num_particles, cartesian_particles, weights)
                 cart_spd = sqrt(sum(cartesian_particles(3:4,:)**2, dim=1))
                 call convert_particles_cart2pol(obs_cart, num_particles, cartesian_particles, polar_particles)
                 write(*,'(5a21)') 'Quantity / ','Truth / ','Particle AVG / ','Particle STD / ','Particle RMSE / '
