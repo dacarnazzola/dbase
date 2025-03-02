@@ -27,6 +27,17 @@
         "CMAKE_Fortran_COMPILER": "gfortran",
         "CMAKE_Fortran_FLAGS": "-Ofast -march=native -flto -fwhole-program"
       }
+    },
+    {
+      "name": "parallel",
+      "displayName": "gfortran PARALLEL",
+      "description": "optimized parallel options for building with gfortran",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_Fortran_COMPILER": "gfortran",
+        "CMAKE_Fortran_FLAGS": "-Ofast -march=native -flto -fwhole-program -fopenmp -g -fbacktrace"
+      }
     }
   ]
 }

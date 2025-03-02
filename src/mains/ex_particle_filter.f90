@@ -5,7 +5,6 @@ use, non_intrinsic :: random, only: random_normal, random_uniform
 use, non_intrinsic :: statistics, only: dsum, avg, std, cumsum, cov
 use, non_intrinsic :: vector_math, only: vdot
 use, non_intrinsic :: system, only: debug_error_condition
-use, non_intrinsic :: matrix_math, only: chol
 implicit none
 private
 
@@ -345,10 +344,11 @@ end module pf
 
 
 program ex_particle_filter
+use, intrinsic :: omp_lib
 use, non_intrinsic :: pf
 implicit none
     
-    integer, parameter :: max_trials = 100
+    integer, parameter :: max_trials = 16
     real(dp), parameter :: max_rng   = 500.0_dp*nmi2ft, &
                            max_spd   = 10000.0_dp, &
                            max_acc   = 9.0_dp*g, &
@@ -359,8 +359,8 @@ implicit none
 !                           meas_sig(3) = [1.0_dp, 0.001_dp, 1.0_dp] ! exquisite measurements
 !                           meas_sig(3) = [-1.0_dp, 0.1_dp*deg2rad_dp, -1.0_dp] ! bearing only
 
-    integer :: dr, alt, spd, rough_fac_int, neff_pass_int, num_particles, trial
-    real(dp) :: obs_cart(6), tgt_cart(6), tgt_pol(3), t, rough_fac, neff_pass, meas(3), est_cart(6), est_pol(3), &
+    integer :: dr, tmax_int, spd, rough_fac_int, neff_pass_int, num_particles, trial, num_particles_ii
+    real(dp) :: obs_cart(6), tgt_cart(6), tgt_pol(3), t, tmax, rough_fac, neff_pass, meas(3), est_cart(6), est_pol(3), &
                 x_err(max_trials), y_err(max_trials), pos_err(max_trials), &
                 vx_err(max_trials), vy_err(max_trials), vel_err(max_trials), &
                 ax_err(max_trials), ay_err(max_trials), acc_err(max_trials), &
@@ -368,31 +368,36 @@ implicit none
     real(dp), allocatable :: cartesian_particles(:,:), weights(:), polar_particles(:,:)
     character(len=:), allocatable :: msg, fmtstr
 
-    write(831,'(a)') 'num_particles,rough_fac,neff_pass,downrange_nmi,alt_kft,spd_mach,rmse_rng,rmse_ang,rmse_rngrt,'// &
+    write(831,'(a)') 'num_particles,rough_fac,neff_pass,tmax_sec,downrange_nmi,spd_mach,rmse_rng,rmse_ang,rmse_rngrt,'// &
                      'rmse_x,rmse_y,rmse_vx,rmse_vy,rmse_ax,rmse_ay,rmse_pos,rmse_vel,rmse_acc'
-    do num_particles=10000,100000,10000
+    do num_particles_ii=1,30
+        num_particles = 10**(num_particles_ii/10)*1000*mod(num_particles_ii,10)
+        if (num_particles == 0) cycle
         if (allocated(cartesian_particles)) deallocate(cartesian_particles)
         if (allocated(weights)) deallocate(weights)
         if (allocated(polar_particles)) deallocate(polar_particles)
         allocate(cartesian_particles(size(obs_cart),num_particles), weights(num_particles), polar_particles(3,num_particles))
-    do rough_fac_int=3,9,3 !! 1/3, 1/6, 1/9 sigma
+    do rough_fac_int=1,1 !! 1/3, 1/6, 1/9 sigma
         rough_fac = 1.0_dp/real(rough_fac_int, kind=dp)
-    do neff_pass_int=1,9 !! 10-90% of num_particles
+    do neff_pass_int=11,11 !! 10-90% of num_particles
         neff_pass = real(neff_pass_int, kind=dp)/10.0_dp*num_particles
-    do dr=50,350,5 !! NMI
-    do alt=5,200,5 !! kft
-    do spd=1,5     !! ~Mach
+    do tmax_int=120,120 !! performance should increase with tmax until target passes max_spd
+        tmax = real(tmax_int, kind=dp)
+    do dr=250,250 !! NMI
+    do spd=3,3    !! ~Mach
+        write(*,'(a)') 'entering TRIAL loop...'
+    !$omp parallel do default(firstprivate) shared(x_err, y_err, vx_err, vy_err, ax_err, ay_err, pos_err, vel_err, acc_err, rng_err, ang_err, rngrt_err)
     do trial=1,max_trials
         !! reset starting positions for each run
         obs_cart = 0.0_dp
         tgt_cart = 0.0_dp !! initialize all state components to zero (0.0)
         tgt_cart(1) = dr*nmi2ft !! x position [ft]
-        tgt_cart(2) = alt*1000.0_dp !! y position [ft]
         tgt_cart(3) = -spd*cos(45*deg2rad_dp) !! vx velocity [ft/sec]
         tgt_cart(4) = spd*sin(45*deg2rad_dp) !! vy velocity [ft/sec]
         tgt_cart(6) = -32.2_dp !! ay acceleration [ft/sec**2]
         call perfect_cart2pol(obs_cart, tgt_cart, tgt_pol)
         call initialize_particles(obs_cart, tgt_cart, meas_sig, max_rng, max_spd, num_particles, cartesian_particles, weights)
+        write(*,'(a,i0,a)') 'thread ',omp_get_thread_num(),' initialized particles'
         if (debug) then
             call convert_particles_cart2pol(obs_cart, num_particles, cartesian_particles, polar_particles)
             call calculate_weights(tgt_pol, meas_sig, num_particles, polar_particles, weights)
@@ -413,25 +418,36 @@ implicit none
                                      ', ay: ',tgt_cart(6),' ft/sec**2'
         end if
         t = 0.0_dp
-        do while (tgt_cart(2) > 0.0_dp)
+        write(*,'(a,i0,a)') 'thread ',omp_get_thread_num(),' beginning t loop'
+        do while (t < tmax)
             !! advance time and target independent of anything else
             t = t + dt
             call fly_constant_acceleration(tgt_cart, dt, huge(max_spd))
             call fly_constant_acceleration(obs_cart, dt, max_spd)
+        write(*,'(a,i0,a)') 'thread ',omp_get_thread_num(),' updated true positions'
             !! update tgt_pol
             call perfect_cart2pol(obs_cart, tgt_cart, tgt_pol)
+        write(*,'(a,i0,a)') 'thread ',omp_get_thread_num(),' converted tgt_cart --> tgt_pol'
             !! generate new measurement from observer perspective
             call generate_measurements(obs_cart, tgt_cart, meas_sig, max_rng, max_spd, 1, meas)
+        write(*,'(a,i0,a)') 'thread ',omp_get_thread_num(),' measured tgt_cart'
             !! propagate current particles
             call propagate_particles(dt, jerk_sig, max_spd, max_acc, num_particles, cartesian_particles)
+        write(*,'(a,i0,a)') 'thread ',omp_get_thread_num(),' propagated particles'
             !! apply constraints and convert particles from cartesian to polar representation
             call apply_constraints(obs_cart, max_rng, max_spd, max_acc, num_particles, cartesian_particles, polar_particles)
+        write(*,'(a,i0,a)') 'thread ',omp_get_thread_num(),' applied constraints'
             !! calculate weights, resample if Neff is below neff_pass (acceptable percentage of original num_particles)
             call calculate_weights(meas, meas_sig, num_particles, polar_particles, weights)
+        write(*,'(a,i0,a)') 'thread ',omp_get_thread_num(),' recalculated weighs'
             if (neff(weights) < neff_pass) then
+                rough_fac = neff(weights)**(-1.0_dp/(size(cartesian_particles,dim=1)+4))
                 msg = 'particles resampled'
+        write(*,'(a,i0,a)') 'thread ',omp_get_thread_num(),' about to resample'
                 call resample_systematic(num_particles, cartesian_particles, weights)
-                call apply_roughening(rough_fac*dt, num_particles, cartesian_particles)
+        write(*,'(a,i0,a)') 'thread ',omp_get_thread_num(),' completed resampling weights'
+                call apply_roughening(rough_fac, num_particles, cartesian_particles)
+        write(*,'(a,i0,a)') 'thread ',omp_get_thread_num(),' applied roughening'
             else
                 msg = 'tracking update'
             end if
@@ -440,19 +456,24 @@ implicit none
             end if
         end do
         call generate_state_estimate(est_pol, num_particles, polar_particles, weights)
+        write(*,'(a,i0,a)') 'thread ',omp_get_thread_num(),' converted particle filter estimate to est_pol'
         rng_err(trial) = tgt_pol(1) - est_pol(1)
         ang_err(trial) = mod(tgt_pol(2) - est_pol(2) + pi_dp, twopi_dp) - pi_dp
         rngrt_err(trial) = tgt_pol(3) - est_pol(3)
+        write(*,'(a,i0,a)') 'thread ',omp_get_thread_num(),' assigned rng_err,ang_err,rngrt_err for output'
         call generate_state_estimate(est_cart, num_particles, cartesian_particles, weights)
+        write(*,'(a,i0,a)') 'thread ',omp_get_thread_num(),' converted particle filter estimate to est_cart'
         x_err(trial) = tgt_cart(1) - est_cart(1)
         y_err(trial) = tgt_cart(2) - est_cart(2)
         vx_err(trial) = tgt_cart(3) - est_cart(3)
         vy_err(trial) = tgt_cart(4) - est_cart(4)
         ax_err(trial) = tgt_cart(5) - est_cart(5)
         ay_err(trial) = tgt_cart(6) - est_cart(6)
+        write(*,'(a,i0,a)') 'thread ',omp_get_thread_num(),' assigned x_err,y_err,vx_err,vy_err,ax_err,ay_err for output'
         pos_err(trial) = sqrt((tgt_cart(1) - est_cart(1))**2 + (tgt_cart(2) - est_cart(2))**2)
         vel_err(trial) = sqrt((tgt_cart(3) - est_cart(3))**2 + (tgt_cart(4) - est_cart(4))**2)
         acc_err(trial) = sqrt((tgt_cart(5) - est_cart(5))**2 + (tgt_cart(6) - est_cart(6))**2)
+        write(*,'(a,i0,a)') 'thread ',omp_get_thread_num(),' assigned pos_err,vel_err,acc_err for output'
         if (debug) then
             write(*,'(a,f0.1,a,f0.3,a,f0.3,a,f0.1,a,f0.1,a)') 'MEAS_SIG: ', &                      !! a
                                                                meas_sig(1),' ft (', &              !! f0.1,a
@@ -481,17 +502,24 @@ implicit none
             write(*,*) ''
         end if
     end do
+    !$omp end parallel do
+        write(*,'(a)') 'exited TRIAL loop'
         !! trials done
-        fmtstr = '(i0,",",f0.4,",",f0.1,",",3(i0,","),11(e13.6,","),e13.6)'
-        write(831,fmt=fmtstr) num_particles,rough_fac,neff_pass/num_particles,dr,alt,spd, &
+        fmtstr = '(i0,",",f0.4,",",f0.1,",",f0.1,",",2(i0,","),11(e13.6,","),e13.6)'
+        write(831,fmt=fmtstr) num_particles,rough_fac_int/10.0_dp,neff_pass/num_particles,tmax,dr,spd, &
                               rmse(rng_err,0.0_dp),rmse(ang_err,0.0_dp),rmse(rngrt_err,0.0_dp), &
                               rmse(x_err,0.0_dp),rmse(y_err,0.0_dp), &
                               rmse(vx_err,0.0_dp),rmse(vy_err,0.0_dp), &
                               rmse(ax_err,0.0_dp),rmse(ay_err,0.0_dp), &
                               rmse(pos_err,0.0_dp),rmse(vel_err,0.0_dp),rmse(acc_err,0.0_dp)
-        write(*,'(a,6e13.6)') 'RMSE rng/ang/rng-rt/pos/vel/acc :: ', &
-                              rmse(rng_err,0.0_dp),rmse(ang_err,0.0_dp),rmse(rngrt_err,0.0_dp), &
-                              rmse(pos_err,0.0_dp),rmse(vel_err,0.0_dp),rmse(acc_err,0.0_dp)
+!        write(*,'(a,6e13.6)') 'RMSE rng/ang/rng-rt/pos/vel/acc :: ', &
+!                              rmse(rng_err,0.0_dp),rmse(ang_err,0.0_dp),rmse(rngrt_err,0.0_dp), &
+!                              rmse(pos_err,0.0_dp),rmse(vel_err,0.0_dp),rmse(acc_err,0.0_dp)
+        write(*,'(a,i0,a,f5.3,a,f4.2,a,f5.1,a,e13.6)') 'particles: ',num_particles, &
+                                                       ', rough_fac: ',rough_fac_int/10.0_dp, &
+                                                       ', neff_pass: ',neff_pass/num_particles, &
+                                                       ', tmax: ',tmax, &
+                                                       ', rmse pos_err: ',rmse(pos_err,0.0_dp)
     end do
     end do
     end do
