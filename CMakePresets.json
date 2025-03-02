@@ -36,7 +36,7 @@
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_Fortran_COMPILER": "gfortran",
-        "CMAKE_Fortran_FLAGS": "-Ofast -march=native -flto -fwhole-program -fopenmp -g -fbacktrace"
+        "CMAKE_Fortran_FLAGS": "-O3 -march=native -flto -fwhole-program -fopenmp"
       }
     }
   ]
