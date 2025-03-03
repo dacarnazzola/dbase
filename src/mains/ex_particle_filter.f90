@@ -221,18 +221,20 @@ contains
                 j = j + 1
             end do
         end do
-        resamples = resamples - real(resamples_int, kind=dp)
-        call normalize(resamples)
-        call cumsum(resamples)
-        resamples(n) = 1.0_dp
-        call random_uniform(u(1:n-j+1), 0.0_dp, 1.0_dp)
-        do i=1,n-j+1
-            k = 1
-            do while (u(i) > resamples(k))
-                k = k + 1
+        resamples = resamples - real(floor(resamples), kind=dp)
+        if (dsum(resamples) > 0.0_dp) then
+            call normalize(resamples)
+            call cumsum(resamples)
+            resamples(n) = 1.0_dp
+            call random_uniform(u(1:n-j+1), 0.0_dp, 1.0_dp)
+            do i=1,n-j+1
+                k = 1
+                do while (u(i) > resamples(k))
+                    k = k + 1
+                end do
+                new_particles(:,i+j-1) = cartesian_particles(:,k)
             end do
-            new_particles(:,i+j-1) = cartesian_particles(:,k)
-        end do
+        end if
         cartesian_particles = new_particles
         inv_n = 1.0_dp/real(n, kind=dp)
         weights = inv_n
