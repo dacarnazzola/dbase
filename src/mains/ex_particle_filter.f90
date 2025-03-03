@@ -609,12 +609,12 @@ implicit none
                                   rmse(ax_err,0.0_dp),rmse(ay_err,0.0_dp), &
                                   rmse(pos_err,0.0_dp),rmse(vel_err,0.0_dp),rmse(acc_err,0.0_dp)
         end if
-        write(*,'(a,i0,a,f5.3,a,f4.2,a,f5.1,a,e13.6)') 'particles: ',num_particles, &
-                                                       ', '//trim(resample_strategy)// &
-                                                       ', rough_fac: ',rough_fac, &
-                                                       ', neff_thresh: ',neff_thresh, &
-                                                       ', tmax: ',tmax, &
-                                                       ', rmse pos_err: ',rmse(pos_err,0.0_dp)
+        write(*,'(a,i0,a,a10,a,f5.3,a,f4.2,a,f5.1,a,e13.6)') 'particles: ',num_particles, &
+                                                             ', ',trim(resample_strategy), &
+                                                             ', rough_fac: ',rough_fac, &
+                                                             ', neff_thresh: ',neff_thresh, &
+                                                             ', tmax: ',tmax, &
+                                                             ', rmse pos_err: ',rmse(pos_err,0.0_dp)
     end do
     end do
     end do

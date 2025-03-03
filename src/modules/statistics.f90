@@ -462,16 +462,23 @@ contains
         real(kind=sp), intent(in) :: x(:,:)
         real(kind=sp), intent(out) :: xcov(size(x, dim=1, kind=i64),size(x, dim=1, kind=i64))
         integer(kind=i64) :: ndims, i, j
-        real(kind=sp) :: x1_res(size(x, dim=2, kind=i64)), x2_res(size(x, dim=2, kind=i64)), nsamples
+        real(kind=sp) :: x1_res(size(x, dim=2, kind=i64)), x2_res(size(x, dim=2, kind=i64)), nsamples, &
+                         row_avg(size(x, dim=1, kind=i64))
         ndims = size(x, dim=1, kind=i64)
+        do i=1_i64,ndims
+            row_avg(i) = avg(x(i,:))
+        end do
         nsamples = real(size(x, dim=2, kind=i64), kind=sp)
         do i=1_i64,ndims
-            x1_res = x(i,:) - avg(x(i,:))
+            x1_res = x(i,:) - row_avg(i)
             do j=i,ndims
-                x2_res = x(j,:) - avg(x(j,:))
+                x2_res = x(j,:) - row_avg(j)
                 xcov(j,i) = dsum(x1_res*x2_res)/nsamples
                 if (j /= i) xcov(i,j) = xcov(j,i)
             end do
+        end do
+        do i=1_i64,ndims
+            xcov(i,i) = xcov(i,i) + 1.0e-6_sp
         end do
     end subroutine cov_sp
 
@@ -479,16 +486,23 @@ contains
         real(kind=dp), intent(in) :: x(:,:)
         real(kind=dp), intent(out) :: xcov(size(x, dim=1, kind=i64),size(x, dim=1, kind=i64))
         integer(kind=i64) :: ndims, i, j
-        real(kind=dp) :: x1_res(size(x, dim=2, kind=i64)), x2_res(size(x, dim=2, kind=i64)), nsamples
+        real(kind=dp) :: x1_res(size(x, dim=2, kind=i64)), x2_res(size(x, dim=2, kind=i64)), nsamples, &
+                         row_avg(size(x, dim=1, kind=i64))
         ndims = size(x, dim=1, kind=i64)
+        do i=1_i64,ndims
+            row_avg(i) = avg(x(i,:))
+        end do
         nsamples = real(size(x, dim=2, kind=i64), kind=dp)
         do i=1_i64,ndims
-            x1_res = x(i,:) - avg(x(i,:))
+            x1_res = x(i,:) - row_avg(i)
             do j=i,ndims
-                x2_res = x(j,:) - avg(x(j,:))
+                x2_res = x(j,:) - row_avg(j)
                 xcov(j,i) = dsum(x1_res*x2_res)/nsamples
                 if (j /= i) xcov(i,j) = xcov(j,i)
             end do
+        end do
+        do i=1_i64,ndims
+            xcov(i,i) = xcov(i,i) + 1.0e-12_dp
         end do
     end subroutine cov_dp
 
