@@ -4,7 +4,7 @@ use, non_intrinsic :: constants, only: pi_dp, twopi_dp, deg2rad_dp, rad2deg_dp
 use, non_intrinsic :: random, only: random_normal, random_uniform
 use, non_intrinsic :: statistics, only: dsum, avg, std, cumsum, cov, normalize
 use, non_intrinsic :: vector_math, only: vdot
-use, non_intrinsic :: system, only: debug_error_condition
+use, non_intrinsic :: system, only: debug_error_condition, nearly
 implicit none
 private
 
@@ -18,10 +18,10 @@ private
     public :: debug, dp, nmi2ft, ft2nmi, deg2rad_dp, rad2deg_dp, g, pi_dp, twopi_dp, &
               perfect_cart2pol, generate_measurements, initialize_particles, convert_particles_cart2pol, &
               generate_state_estimate, calculate_weights, apply_roughening, &
-              resample_systematic, resample_multinomial, resample_residual, &
+              resample_systematic, resample_multinomial, resample_residual, resample_stratified, &
               fly_constant_acceleration, propagate_particles, apply_constraints, &
               rmse, neff, print_summary, &
-              avg, std
+              avg, std, nearly
 
 contains
 
@@ -155,7 +155,7 @@ contains
             if (meas_sig(1) > 0) err_fac(1) = (polar_particles(1,i) - tgt_pol(1))**2/meas_sig(1)**2
             if (meas_sig(2) > 0) err_fac(2) = (mod(polar_particles(2,i) - tgt_pol(2) + pi_dp, twopi_dp) - pi_dp)**2/meas_sig(2)**2
             if (meas_sig(3) > 0) err_fac(3) = (polar_particles(3,i) - tgt_pol(3))**2/meas_sig(3)**2
-            weights(i) = weights(i)*exp(-0.5*(err_fac(1) + err_fac(2) + err_fac(3))) + 1.0e-12_dp
+            weights(i) = max(1.0e-12_dp, weights(i)*exp(-0.5*(err_fac(1) + err_fac(2) + err_fac(3))))
         end do
         weights = weights/dsum(weights)
     end
@@ -168,6 +168,7 @@ contains
         call debug_error_condition(size(cartesian_particles, dim=2) /= n, 'mismatch in cartesian_particles shape')
         call debug_error_condition(size(weights) /= n, 'size of weights array needs to match n')
         call cumsum(weights)
+        weights(n) = 1.0_dp
         inv_n = 1.0_dp/real(n, kind=dp)
         call random_uniform(u, 0.0_dp, inv_n)
         j = 1
@@ -190,6 +191,7 @@ contains
         call debug_error_condition(size(cartesian_particles, dim=2) /= n, 'mismatch in cartesian_particles shape')
         call debug_error_condition(size(weights) /= n, 'size of weights array needs to match n')
         call cumsum(weights)
+        weights(n) = 1.0_dp
         call random_uniform(u, 0.0_dp, 1.0_dp)
         do i=1,n
             j = 1
@@ -222,6 +224,7 @@ contains
         resamples = resamples - real(resamples_int, kind=dp)
         call normalize(resamples)
         call cumsum(resamples)
+        resamples(n) = 1.0_dp
         call random_uniform(u(1:n-j+1), 0.0_dp, 1.0_dp)
         do i=1,n-j+1
             k = 1
@@ -232,6 +235,31 @@ contains
         end do
         cartesian_particles = new_particles
         inv_n = 1.0_dp/real(n, kind=dp)
+        weights = inv_n
+    end
+
+    impure subroutine resample_stratified(n, cartesian_particles, weights)
+        integer, intent(in) :: n
+        real(dp), intent(inout) :: cartesian_particles(:,:), weights(:)
+        real(dp) :: u(n), inv_n, new_particles(size(cartesian_particles,dim=1),size(cartesian_particles,dim=2))
+        integer :: i, j
+        call debug_error_condition(size(cartesian_particles, dim=2) /= n, 'mismatch in cartesian_particles shape')
+        call debug_error_condition(size(weights) /= n, 'size of weights array needs to match n')
+        inv_n = 1.0_dp/real(n, kind=dp)
+        call random_uniform(u, 0.0_dp, 1.0_dp)
+        do i=1,n
+            u(i) = (u(i) + real(i-1,dp))*inv_n
+        end do
+        call cumsum(weights)
+        weights(n) = 1.0_dp
+        j = 1
+        do i=1,n
+            do while (u(i) > weights(j))
+                j = j + 1
+            end do
+            new_particles(:,i) = cartesian_particles(:,j)
+        end do
+        cartesian_particles = new_particles
         weights = inv_n
     end
 
@@ -400,7 +428,7 @@ program ex_particle_filter
 use, non_intrinsic :: pf
 implicit none
     
-    integer, parameter :: max_trials = 128
+    integer, parameter :: max_trials = 1024
     real(dp), parameter :: max_rng   = 500.0_dp*nmi2ft, &
                            max_spd   = 10000.0_dp, &
                            max_acc   = 9.0_dp*g, &
@@ -423,7 +451,7 @@ implicit none
 
     write(831,'(a)') 'num_particles,resampling_method,rough_fac,neff_thresh,tmax_sec,downrange_nmi,spd_mach,'// &
                      'rmse_rng,rmse_ang,rmse_rngrt,rmse_x,rmse_y,rmse_vx,rmse_vy,rmse_ax,rmse_ay,rmse_pos,rmse_vel,rmse_acc'
-    do num_particles_ii=1,1,10
+    do num_particles_ii=1,31,10
         num_particles = 10**(num_particles_ii/10)*1000*mod(num_particles_ii,10)
         if (num_particles == 0) cycle
         if (allocated(cartesian_particles)) deallocate(cartesian_particles)
@@ -436,7 +464,7 @@ implicit none
         neff0 = num_particles
     do rough_fac_int=5,100,5 !! scaling Neff**(-1/(d+4))
         rough_fac = real(rough_fac_int, kind=dp)/100.0_dp
-    do resampling_method=1,3 !! simple select case on method used
+    do resampling_method=1,4 !! simple select case on method used
         select case (resampling_method)
             case (1)
                 resample_strategy = 'systematic'
@@ -444,6 +472,8 @@ implicit none
                 resample_strategy = 'multinomial'
             case (3)
                 resample_strategy = 'residual'
+            case (4)
+                resample_strategy = 'stratified'
             case default
                 error stop 'not implemented yet'
         end select
@@ -509,6 +539,8 @@ implicit none
                         call resample_multinomial(num_particles, cartesian_particles, weights)
                     case (3)
                         call resample_residual(num_particles, cartesian_particles, weights)
+                    case (4)
+                        call resample_stratified(num_particles, cartesian_particles, weights)
                     case default
                         write(*,*) 'resampling method: ',resampling_method
                         error stop 'not implemented'
@@ -567,12 +599,14 @@ implicit none
     !$omp end parallel do
         !! trials done
         fmtstr = '(i0,",",a,",",2(f0.4,","),f0.1,",",2(i0,","),11(e13.6,","),e13.6)'
-        write(831,fmt=trim(fmtstr)) num_particles,trim(resample_strategy),rough_fac,neff_thresh,tmax,dr,spd, &
-                              rmse(rng_err,0.0_dp),rmse(ang_err,0.0_dp),rmse(rngrt_err,0.0_dp), &
-                              rmse(x_err,0.0_dp),rmse(y_err,0.0_dp), &
-                              rmse(vx_err,0.0_dp),rmse(vy_err,0.0_dp), &
-                              rmse(ax_err,0.0_dp),rmse(ay_err,0.0_dp), &
-                              rmse(pos_err,0.0_dp),rmse(vel_err,0.0_dp),rmse(acc_err,0.0_dp)
+        if (all(nearly(pos_err, pos_err))) then
+            write(831,fmt=trim(fmtstr)) num_particles,trim(resample_strategy),rough_fac,neff_thresh,tmax,dr,spd, &
+                                  rmse(rng_err,0.0_dp),rmse(ang_err,0.0_dp),rmse(rngrt_err,0.0_dp), &
+                                  rmse(x_err,0.0_dp),rmse(y_err,0.0_dp), &
+                                  rmse(vx_err,0.0_dp),rmse(vy_err,0.0_dp), &
+                                  rmse(ax_err,0.0_dp),rmse(ay_err,0.0_dp), &
+                                  rmse(pos_err,0.0_dp),rmse(vel_err,0.0_dp),rmse(acc_err,0.0_dp)
+        end if
         write(*,'(a,i0,a,f5.3,a,f4.2,a,f5.1,a,e13.6)') 'particles: ',num_particles, &
                                                        ', '//trim(resample_strategy)// &
                                                        ', rough_fac: ',rough_fac, &
