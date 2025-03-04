@@ -1,6 +1,6 @@
 module sorting
 use, non_intrinsic :: kinds, only: i32, i64, sp, dp, c_bool
-use, non_intrinsic :: constants, only: i32_vec_len, i64_vec_len, sp_vec_len, dp_vec_len
+use, non_intrinsic :: constants, only: vec_len
 implicit none
 private
     
@@ -98,7 +98,7 @@ contains
         integer(kind=i64) :: n, i, ii
         integer(kind=i32) :: u, v, w
         n = size(x, kind=i64)
-        if (n <= i32_vec_len) then
+        if (n <= vec_len) then
             call isort(x)
         else
             u = x(1_i64)
@@ -132,7 +132,7 @@ contains
         integer(kind=i64), intent(inout) :: x(:)
         integer(kind=i64) :: n, i, ii, u, v, w
         n = size(x, kind=i64)
-        if (n <= i64_vec_len) then
+        if (n <= vec_len) then
             call isort(x)
         else
             u = x(1_i64)
@@ -167,7 +167,7 @@ contains
         integer(kind=i64) :: n, i, ii
         real(kind=sp) :: u, v, w
         n = size(x, kind=i64)
-        if (n <= sp_vec_len) then
+        if (n <= vec_len) then
             call isort(x)
         else
             u = x(1_i64)
@@ -202,7 +202,7 @@ contains
         integer(kind=i64) :: n, i, ii
         real(kind=dp) :: u, v, w
         n = size(x, kind=i64)
-        if (n <= dp_vec_len) then
+        if (n <= vec_len) then
             call isort(x)
         else
             u = x(1_i64)
@@ -238,7 +238,7 @@ contains
         integer(kind=i64) :: n, i, ii, uxi, vxi, wxi
         integer(kind=i32) :: u, v, w
         n = size(x, kind=i64)
-        if (n <= i32_vec_len) then
+        if (n <= vec_len) then
             call isort(x, xi)
         else
             u = x(1_i64)
@@ -286,7 +286,7 @@ contains
         integer(kind=i64), intent(inout) :: xi(size(x, kind=i64))
         integer(kind=i64) :: n, i, ii, uxi, vxi, wxi, u, v, w
         n = size(x, kind=i64)
-        if (n <= i64_vec_len) then
+        if (n <= vec_len) then
             call isort(x, xi)
         else
             u = x(1_i64)
@@ -335,7 +335,7 @@ contains
         integer(kind=i64) :: n, i, ii, uxi, vxi, wxi
         real(kind=sp) :: u, v, w
         n = size(x, kind=i64)
-        if (n <= sp_vec_len) then
+        if (n <= vec_len) then
             call isort(x, xi)
         else
             u = x(1_i64)
@@ -384,7 +384,7 @@ contains
         integer(kind=i64) :: n, i, ii, uxi, vxi, wxi
         real(kind=dp) :: u, v, w
         n = size(x, kind=i64)
-        if (n <= dp_vec_len) then
+        if (n <= vec_len) then
             call isort(x, xi)
         else
             u = x(1_i64)

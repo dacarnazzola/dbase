@@ -1,6 +1,6 @@
 module vector_math
 use, non_intrinsic :: kinds, only: i32, i64, sp, dp
-use, non_intrinsic :: constants, only: i32_vec_len, i64_vec_len, sp_vec_len, dp_vec_len
+use, non_intrinsic :: constants, only: vec_len
 use, non_intrinsic :: system, only: debug_error_condition, nearly
 implicit none
 private
@@ -31,18 +31,18 @@ contains
     pure function vdot_i32(v1, v2) result(val)
         integer(kind=i32), intent(in) :: v1(:), v2(size(v1, kind=i64))
         integer(kind=i32) :: val
-        integer(kind=i32) :: accumulators(i32_vec_len)
+        integer(kind=i32) :: accumulators(vec_len)
         integer(kind=i64) :: n, i
         val = 0_i32
         n = size(v1, kind=i64)
         if (n > 0_i64) then
             accumulators = 0_i32
-            do i = 1_i64, n - sp_vec_len + 1_i64, sp_vec_len
-                accumulators = accumulators + v1(i:i+sp_vec_len-1_i64)*v2(i:i+sp_vec_len-1_i64)
+            do i = 1_i64, n - vec_len + 1_i64, vec_len
+                accumulators = accumulators + v1(i:i+vec_len-1_i64)*v2(i:i+vec_len-1_i64)
             end do
-            i = n - (n/sp_vec_len)*sp_vec_len
+            i = n - (n/vec_len)*vec_len
             accumulators(1_i64:i) = accumulators(1_i64:i) + v1(n-i+1_i64:n)*v2(n-i+1_i64:n)
-            do i = 1_i64, sp_vec_len, 2_i64
+            do i = 1_i64, vec_len, 2_i64
                 val = val + accumulators(i) + accumulators(i + 1_i64)
             end do
         end if
@@ -51,17 +51,17 @@ contains
     pure function vdot_i64(v1, v2) result(val)
         integer(kind=i64), intent(in) :: v1(:), v2(size(v1, kind=i64))
         integer(kind=i64) :: val
-        integer(kind=i64) :: n, i, accumulators(i32_vec_len)
+        integer(kind=i64) :: n, i, accumulators(vec_len)
         val = 0_i64
         n = size(v1, kind=i64)
         if (n > 0_i64) then
             accumulators = 0_i64
-            do i = 1_i64, n - sp_vec_len + 1_i64, sp_vec_len
-                accumulators = accumulators + v1(i:i+sp_vec_len-1_i64)*v2(i:i+sp_vec_len-1_i64)
+            do i = 1_i64, n - vec_len + 1_i64, vec_len
+                accumulators = accumulators + v1(i:i+vec_len-1_i64)*v2(i:i+vec_len-1_i64)
             end do
-            i = n - (n/sp_vec_len)*sp_vec_len
+            i = n - (n/vec_len)*vec_len
             accumulators(1_i64:i) = accumulators(1_i64:i) + v1(n-i+1_i64:n)*v2(n-i+1_i64:n)
-            do i = 1_i64, sp_vec_len, 2_i64
+            do i = 1_i64, vec_len, 2_i64
                 val = val + accumulators(i) + accumulators(i + 1_i64)
             end do
         end if
@@ -70,18 +70,18 @@ contains
     pure function vdot_sp(v1, v2) result(val)
         real(kind=sp), intent(in) :: v1(:), v2(size(v1, kind=i64))
         real(kind=sp) :: val
-        real(kind=sp) :: accumulators(i32_vec_len)
+        real(kind=sp) :: accumulators(vec_len)
         integer(kind=i64) :: n, i
         val = 0.0_sp
         n = size(v1, kind=i64)
         if (n > 0_i64) then
             accumulators = 0.0_sp
-            do i = 1_i64, n - sp_vec_len + 1_i64, sp_vec_len
-                accumulators = accumulators + v1(i:i+sp_vec_len-1_i64)*v2(i:i+sp_vec_len-1_i64)
+            do i = 1_i64, n - vec_len + 1_i64, vec_len
+                accumulators = accumulators + v1(i:i+vec_len-1_i64)*v2(i:i+vec_len-1_i64)
             end do
-            i = n - (n/sp_vec_len)*sp_vec_len
+            i = n - (n/vec_len)*vec_len
             accumulators(1_i64:i) = accumulators(1_i64:i) + v1(n-i+1_i64:n)*v2(n-i+1_i64:n)
-            do i = 1_i64, sp_vec_len, 2_i64
+            do i = 1_i64, vec_len, 2_i64
                 val = val + accumulators(i) + accumulators(i + 1_i64)
             end do
         end if
@@ -90,18 +90,18 @@ contains
     pure function vdot_dp(v1, v2) result(val)
         real(kind=dp), intent(in) :: v1(:), v2(size(v1, kind=i64))
         real(kind=dp) :: val
-        real(kind=dp) :: accumulators(i32_vec_len)
+        real(kind=dp) :: accumulators(vec_len)
         integer(kind=i64) :: n, i
         val = 0.0_dp
         n = size(v1, kind=i64)
         if (n > 0_i64) then
             accumulators = 0.0_dp
-            do i = 1_i64, n - sp_vec_len + 1_i64, sp_vec_len
-                accumulators = accumulators + v1(i:i+sp_vec_len-1_i64)*v2(i:i+sp_vec_len-1_i64)
+            do i = 1_i64, n - vec_len + 1_i64, vec_len
+                accumulators = accumulators + v1(i:i+vec_len-1_i64)*v2(i:i+vec_len-1_i64)
             end do
-            i = n - (n/sp_vec_len)*sp_vec_len
+            i = n - (n/vec_len)*vec_len
             accumulators(1_i64:i) = accumulators(1_i64:i) + v1(n-i+1_i64:n)*v2(n-i+1_i64:n)
-            do i = 1_i64, sp_vec_len, 2_i64
+            do i = 1_i64, vec_len, 2_i64
                 val = val + accumulators(i) + accumulators(i + 1_i64)
             end do
         end if

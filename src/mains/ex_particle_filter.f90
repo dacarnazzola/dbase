@@ -1,6 +1,6 @@
 module pf
 use, non_intrinsic :: kinds, only: dp
-use, non_intrinsic :: constants, only: pi_dp, twopi_dp, deg2rad_dp, rad2deg_dp
+use, non_intrinsic :: constants, only: pi_dp, twopi_dp, deg2rad_dp, rad2deg_dp, eps_dp
 use, non_intrinsic :: random, only: random_normal, random_uniform
 use, non_intrinsic :: statistics, only: dsum, avg, std, cumsum, cov, normalize
 use, non_intrinsic :: vector_math, only: vdot
@@ -155,7 +155,7 @@ contains
             if (meas_sig(1) > 0) err_fac(1) = (polar_particles(1,i) - tgt_pol(1))**2/meas_sig(1)**2
             if (meas_sig(2) > 0) err_fac(2) = (mod(polar_particles(2,i) - tgt_pol(2) + pi_dp, twopi_dp) - pi_dp)**2/meas_sig(2)**2
             if (meas_sig(3) > 0) err_fac(3) = (polar_particles(3,i) - tgt_pol(3))**2/meas_sig(3)**2
-            weights(i) = max(1.0e-12_dp, weights(i)*exp(-0.5*(err_fac(1) + err_fac(2) + err_fac(3))))
+            weights(i) = max(eps_dp, weights(i)*exp(-0.5*(err_fac(1) + err_fac(2) + err_fac(3))))
         end do
         weights = weights/dsum(weights)
     end
@@ -429,12 +429,12 @@ end module pf
 program ex_particle_filter
 use, non_intrinsic :: pf
 implicit none
-    
-    integer, parameter :: max_trials = 1024
+
+    integer, parameter :: max_trials = 1
     real(dp), parameter :: max_rng   = 500.0_dp*nmi2ft, &
                            max_spd   = 10000.0_dp, &
                            max_acc   = 9.0_dp*g, &
-                           jerk_sig  = 0.01_dp*g, &
+                           jerk_sig  = 0.001_dp*g, &
                            dt        = 1.0_dp, &
                            meas_sig(3) = [10.0_dp*nmi2ft, 5.0_dp*deg2rad_dp, 200.0_dp] ! poor measurements
 !                           meas_sig(3) = [100.0_dp, 0.1_dp*deg2rad_dp, 10.0_dp] ! standard measurements
@@ -453,18 +453,18 @@ implicit none
 
     write(831,'(a)') 'num_particles,resampling_method,rough_fac,neff_thresh,tmax_sec,downrange_nmi,spd_mach,'// &
                      'rmse_rng,rmse_ang,rmse_rngrt,rmse_x,rmse_y,rmse_vx,rmse_vy,rmse_ax,rmse_ay,rmse_pos,rmse_vel,rmse_acc'
-    do num_particles_ii=1,31,10
+    do num_particles_ii=1,1,10
         num_particles = 10**(num_particles_ii/10)*1000*mod(num_particles_ii,10)
         if (num_particles == 0) cycle
         if (allocated(cartesian_particles)) deallocate(cartesian_particles)
         if (allocated(weights)) deallocate(weights)
         if (allocated(polar_particles)) deallocate(polar_particles)
         allocate(cartesian_particles(size(obs_cart),num_particles), weights(num_particles), polar_particles(3,num_particles))
-    do neff_pass_int=5,100,5 !! respample when Neff is 5-100% of num_particles
+    do neff_pass_int=10,90,40 !! respample when Neff is 5-100% of num_particles
         neff_thresh = real(neff_pass_int, kind=dp)/100.0_dp
         neff_pass = neff_thresh*num_particles
         neff0 = num_particles
-    do rough_fac_int=5,100,5 !! scaling Neff**(-1/(d+4))
+    do rough_fac_int=20,100,20 !! scaling Neff**(-1/(d+4))
         rough_fac = real(rough_fac_int, kind=dp)/100.0_dp
     do resampling_method=1,4 !! simple select case on method used
         select case (resampling_method)
@@ -608,6 +608,8 @@ implicit none
                                   rmse(vx_err,0.0_dp),rmse(vy_err,0.0_dp), &
                                   rmse(ax_err,0.0_dp),rmse(ay_err,0.0_dp), &
                                   rmse(pos_err,0.0_dp),rmse(vel_err,0.0_dp),rmse(acc_err,0.0_dp)
+        else
+            error stop 'bad run'
         end if
         write(*,'(a,i0,a,a10,a,f5.3,a,f4.2,a,f5.1,a,e13.6)') 'particles: ',num_particles, &
                                                              ', ',trim(resample_strategy), &

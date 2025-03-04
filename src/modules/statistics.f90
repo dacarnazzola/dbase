@@ -1,7 +1,8 @@
 module statistics
 use, non_intrinsic :: kinds, only: i32, i64, sp, dp, c_bool
 use, non_intrinsic :: system, only: debug_error_condition, nearly
-use, non_intrinsic :: constants, only: i32_vec_len, i64_vec_len, sp_vec_len, dp_vec_len, twopi_sp, twopi_dp
+use, non_intrinsic :: constants, only: vec_len, eps_sp, eps_dp, twopi_sp, twopi_dp
+use, non_intrinsic :: vector_math, only: vdot
 implicit none
 private
 
@@ -69,18 +70,18 @@ contains
     pure function dsum_i32(x) result(val)
         integer(kind=i32), intent(in) :: x(:)
         integer(kind=i32) :: val
-        integer(kind=i32) :: accumulators(i32_vec_len)
+        integer(kind=i32) :: accumulators(vec_len)
         integer(kind=i64) :: n, i
         val = 0_i32
         n = size(x, kind=i64)
         if (n > 0_i64) then
             accumulators = 0_i32
-            do i = 1_i64, n - sp_vec_len + 1_i64, sp_vec_len
-                accumulators = accumulators + x(i:i+sp_vec_len-1_i64)
+            do i = 1_i64, n - vec_len + 1_i64, vec_len
+                accumulators = accumulators + x(i:i+vec_len-1_i64)
             end do
-            i = n - (n/sp_vec_len)*sp_vec_len
+            i = n - (n/vec_len)*vec_len
             accumulators(1_i64:i) = accumulators(1_i64:i) + x(n-i+1_i64:n)
-            do i = 1_i64, sp_vec_len, 2_i64
+            do i = 1_i64, vec_len, 2_i64
                 val = val + accumulators(i) + accumulators(i + 1_i64)
             end do
         end if
@@ -89,17 +90,17 @@ contains
     pure function dsum_i64(x) result(val)
         integer(kind=i64), intent(in) :: x(:)
         integer(kind=i64) :: val
-        integer(kind=i64) :: n, i, accumulators(i64_vec_len)
+        integer(kind=i64) :: n, i, accumulators(vec_len)
         val = 0_i64
         n = size(x, kind=i64)
         if (n > 0_i64) then
             accumulators = 0_i64
-            do i = 1_i64, n - sp_vec_len + 1_i64, sp_vec_len
-                accumulators = accumulators + x(i:i+sp_vec_len-1_i64)
+            do i = 1_i64, n - vec_len + 1_i64, vec_len
+                accumulators = accumulators + x(i:i+vec_len-1_i64)
             end do
-            i = n - (n/sp_vec_len)*sp_vec_len
+            i = n - (n/vec_len)*vec_len
             accumulators(1_i64:i) = accumulators(1_i64:i) + x(n-i+1_i64:n)
-            do i = 1_i64, sp_vec_len, 2_i64
+            do i = 1_i64, vec_len, 2_i64
                 val = val + accumulators(i) + accumulators(i + 1_i64)
             end do
         end if
@@ -108,18 +109,18 @@ contains
     pure function dsum_sp(x) result(val)
         real(kind=sp), intent(in) :: x(:)
         real(kind=sp) :: val
-        real(kind=sp) :: accumulators(sp_vec_len)
+        real(kind=sp) :: accumulators(vec_len)
         integer(kind=i64) :: n, i
         val = 0.0_sp
         n = size(x, kind=i64)
         if (n > 0_i64) then
             accumulators = 0.0_sp
-            do i = 1_i64, n - sp_vec_len + 1_i64, sp_vec_len
-                accumulators = accumulators + x(i:i+sp_vec_len-1_i64)
+            do i = 1_i64, n - vec_len + 1_i64, vec_len
+                accumulators = accumulators + x(i:i+vec_len-1_i64)
             end do
-            i = n - (n/sp_vec_len)*sp_vec_len
+            i = n - (n/vec_len)*vec_len
             accumulators(1_i64:i) = accumulators(1_i64:i) + x(n-i+1_i64:n)
-            do i = 1_i64, sp_vec_len, 2_i64
+            do i = 1_i64, vec_len, 2_i64
                 val = val + accumulators(i) + accumulators(i + 1_i64)
             end do
         end if
@@ -128,18 +129,18 @@ contains
     pure function dsum_dp(x) result(val)
         real(kind=dp), intent(in) :: x(:)
         real(kind=dp) :: val
-        real(kind=dp) :: accumulators(dp_vec_len)
+        real(kind=dp) :: accumulators(vec_len)
         integer(kind=i64) :: n, i
         val = 0.0_dp
         n = size(x, kind=i64)
         if (n > 0_i64) then
             accumulators = 0.0_dp
-            do i = 1_i64, n - sp_vec_len + 1_i64, sp_vec_len
-                accumulators = accumulators + x(i:i+sp_vec_len-1_i64)
+            do i = 1_i64, n - vec_len + 1_i64, vec_len
+                accumulators = accumulators + x(i:i+vec_len-1_i64)
             end do
-            i = n - (n/sp_vec_len)*sp_vec_len
+            i = n - (n/vec_len)*vec_len
             accumulators(1_i64:i) = accumulators(1_i64:i) + x(n-i+1_i64:n)
-            do i = 1_i64, sp_vec_len, 2_i64
+            do i = 1_i64, vec_len, 2_i64
                 val = val + accumulators(i) + accumulators(i + 1_i64)
             end do
         end if
@@ -148,18 +149,18 @@ contains
     pure function prod_i32(x) result(val)
         integer(kind=i32), intent(in) :: x(:)
         integer(kind=i32) :: val
-        integer(kind=i32) :: accumulators(i32_vec_len)
+        integer(kind=i32) :: accumulators(vec_len)
         integer(kind=i64) :: n, i
         val = 1_i32
         n = size(x, kind=i64)
         if (n > 0_i64) then
             accumulators = 1_i32
-            do i = 1_i64, n - sp_vec_len + 1_i64, sp_vec_len
-                accumulators = accumulators * x(i:i+sp_vec_len-1_i64)
+            do i = 1_i64, n - vec_len + 1_i64, vec_len
+                accumulators = accumulators * x(i:i+vec_len-1_i64)
             end do
-            i = n - (n/sp_vec_len)*sp_vec_len
+            i = n - (n/vec_len)*vec_len
             accumulators(1_i64:i) = accumulators(1_i64:i) * x(n-i+1_i64:n)
-            do i = 1_i64, sp_vec_len, 2_i64
+            do i = 1_i64, vec_len, 2_i64
                 val = val * accumulators(i) * accumulators(i + 1_i64)
             end do
         end if
@@ -168,17 +169,17 @@ contains
     pure function prod_i64(x) result(val)
         integer(kind=i64), intent(in) :: x(:)
         integer(kind=i64) :: val
-        integer(kind=i64) :: n, i, accumulators(i64_vec_len)
+        integer(kind=i64) :: n, i, accumulators(vec_len)
         val = 1_i64
         n = size(x, kind=i64)
         if (n > 0_i64) then
             accumulators = 1_i64
-            do i = 1_i64, n - sp_vec_len + 1_i64, sp_vec_len
-                accumulators = accumulators * x(i:i+sp_vec_len-1_i64)
+            do i = 1_i64, n - vec_len + 1_i64, vec_len
+                accumulators = accumulators * x(i:i+vec_len-1_i64)
             end do
-            i = n - (n/sp_vec_len)*sp_vec_len
+            i = n - (n/vec_len)*vec_len
             accumulators(1_i64:i) = accumulators(1_i64:i) * x(n-i+1_i64:n)
-            do i = 1_i64, sp_vec_len, 2_i64
+            do i = 1_i64, vec_len, 2_i64
                 val = val * accumulators(i) * accumulators(i + 1_i64)
             end do
         end if
@@ -187,18 +188,18 @@ contains
     pure function prod_sp(x) result(val)
         real(kind=sp), intent(in) :: x(:)
         real(kind=sp) :: val
-        real(kind=sp) :: accumulators(sp_vec_len)
+        real(kind=sp) :: accumulators(vec_len)
         integer(kind=i64) :: n, i
         val = 1.0_sp
         n = size(x, kind=i64)
         if (n > 0_i64) then
             accumulators = 1.0_sp
-            do i = 1_i64, n - sp_vec_len + 1_i64, sp_vec_len
-                accumulators = accumulators * x(i:i+sp_vec_len-1_i64)
+            do i = 1_i64, n - vec_len + 1_i64, vec_len
+                accumulators = accumulators * x(i:i+vec_len-1_i64)
             end do
-            i = n - (n/sp_vec_len)*sp_vec_len
+            i = n - (n/vec_len)*vec_len
             accumulators(1_i64:i) = accumulators(1_i64:i) * x(n-i+1_i64:n)
-            do i = 1_i64, sp_vec_len, 2_i64
+            do i = 1_i64, vec_len, 2_i64
                 val = val * accumulators(i) * accumulators(i + 1_i64)
             end do
         end if
@@ -207,18 +208,18 @@ contains
     pure function prod_dp(x) result(val)
         real(kind=dp), intent(in) :: x(:)
         real(kind=dp) :: val
-        real(kind=dp) :: accumulators(dp_vec_len)
+        real(kind=dp) :: accumulators(vec_len)
         integer(kind=i64) :: n, i
         val = 1.0_dp
         n = size(x, kind=i64)
         if (n > 0_i64) then
             accumulators = 1.0_dp
-            do i = 1_i64, n - sp_vec_len + 1_i64, sp_vec_len
-                accumulators = accumulators * x(i:i+sp_vec_len-1_i64)
+            do i = 1_i64, n - vec_len + 1_i64, vec_len
+                accumulators = accumulators * x(i:i+vec_len-1_i64)
             end do
-            i = n - (n/sp_vec_len)*sp_vec_len
+            i = n - (n/vec_len)*vec_len
             accumulators(1_i64:i) = accumulators(1_i64:i) * x(n-i+1_i64:n)
-            do i = 1_i64, sp_vec_len, 2_i64
+            do i = 1_i64, vec_len, 2_i64
                 val = val * accumulators(i) * accumulators(i + 1_i64)
             end do
         end if
@@ -462,23 +463,27 @@ contains
         real(kind=sp), intent(in) :: x(:,:)
         real(kind=sp), intent(out) :: xcov(size(x, dim=1, kind=i64),size(x, dim=1, kind=i64))
         integer(kind=i64) :: ndims, i, j
-        real(kind=sp) :: x1_res(size(x, dim=2, kind=i64)), x2_res(size(x, dim=2, kind=i64)), nsamples, &
-                         row_avg(size(x, dim=1, kind=i64))
+        real(kind=sp) :: x_row(size(x, dim=2, kind=i64)), u, x_centered(size(x, dim=2, kind=i64),size(x, dim=1, kind=i64)), &
+                         nsamples_1
         ndims = size(x, dim=1, kind=i64)
         do i=1_i64,ndims
-            row_avg(i) = avg(x(i,:))
+            x_row = x(i,:)
+            u = avg(x_row)
+            x_centered(:,i) = x_row - u
         end do
-        nsamples = real(size(x, dim=2, kind=i64), kind=sp)
+        nsamples_1 = real(size(x, dim=2, kind=i64) - 1_i64, kind=sp)
         do i=1_i64,ndims
-            x1_res = x(i,:) - row_avg(i)
             do j=i,ndims
-                x2_res = x(j,:) - row_avg(j)
-                xcov(j,i) = dsum(x1_res*x2_res)/nsamples
-                if (j /= i) xcov(i,j) = xcov(j,i)
+                xcov(j,i) = vdot(x_centered(:,i), x_centered(:,j))
             end do
+            xcov(i:ndims,i) = xcov(i:ndims,i)/nsamples_1
+            xcov(i,i) = xcov(i,i) + eps_sp
         end do
         do i=1_i64,ndims
-            xcov(i,i) = xcov(i,i) + 1.0e-6_sp
+            x_row(1_i64:i-1_i64) = xcov(1_i64:i-1_i64,i)
+            do j=1_i64,i-1_i64
+                xcov(j,i) = x_row(j)
+            end do
         end do
     end subroutine cov_sp
 
@@ -486,23 +491,27 @@ contains
         real(kind=dp), intent(in) :: x(:,:)
         real(kind=dp), intent(out) :: xcov(size(x, dim=1, kind=i64),size(x, dim=1, kind=i64))
         integer(kind=i64) :: ndims, i, j
-        real(kind=dp) :: x1_res(size(x, dim=2, kind=i64)), x2_res(size(x, dim=2, kind=i64)), nsamples, &
-                         row_avg(size(x, dim=1, kind=i64))
+        real(kind=dp) :: x_row(size(x, dim=2, kind=i64)), u, x_centered(size(x, dim=2, kind=i64),size(x, dim=1, kind=i64)), &
+                         nsamples_1
         ndims = size(x, dim=1, kind=i64)
         do i=1_i64,ndims
-            row_avg(i) = avg(x(i,:))
+            x_row = x(i,:)
+            u = avg(x_row)
+            x_centered(:,i) = x_row - u
         end do
-        nsamples = real(size(x, dim=2, kind=i64), kind=dp)
+        nsamples_1 = real(size(x, dim=2, kind=i64) - 1_i64, kind=dp)
         do i=1_i64,ndims
-            x1_res = x(i,:) - row_avg(i)
             do j=i,ndims
-                x2_res = x(j,:) - row_avg(j)
-                xcov(j,i) = dsum(x1_res*x2_res)/nsamples
-                if (j /= i) xcov(i,j) = xcov(j,i)
+                xcov(j,i) = vdot(x_centered(:,i), x_centered(:,j))
             end do
+            xcov(i:ndims,i) = xcov(i:ndims,i)/nsamples_1
+            xcov(i,i) = xcov(i,i) + eps_dp
         end do
         do i=1_i64,ndims
-            xcov(i,i) = xcov(i,i) + 1.0e-12_dp
+            x_row(1_i64:i-1_i64) = xcov(1_i64:i-1_i64,i)
+            do j=1_i64,i-1_i64
+                xcov(j,i) = x_row(j)
+            end do
         end do
     end subroutine cov_dp
 
