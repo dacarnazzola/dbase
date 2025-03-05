@@ -451,11 +451,10 @@ program ex_particle_filter
 use, non_intrinsic :: pf
 implicit none
 
-    integer, parameter :: max_trials = 1024
+    integer, parameter :: max_trials = 10
     real(dp), parameter :: max_rng   = 500.0_dp*nmi2ft, &
                            max_spd   = 10000.0_dp, &
                            max_acc   = 9.0_dp*g, &
-                           jerk_sig  = 0.01_dp*g, &
                            dt        = 1.0_dp, &
                            meas_sig(3) = [10.0_dp*nmi2ft, 5.0_dp*deg2rad_dp, 200.0_dp] ! poor measurements
 !                           meas_sig(3) = [100.0_dp, 0.1_dp*deg2rad_dp, 10.0_dp] ! standard measurements
@@ -463,9 +462,9 @@ implicit none
 !                           meas_sig(3) = [-1.0_dp, 0.1_dp*deg2rad_dp, -1.0_dp] ! bearing only
 
     integer :: dr, tmax_int, spd, rough_fac_int, neff_pass_int, num_particles, trial, num_particles_ii, init_meas_sig, &
-               resampling_method
+               resampling_method, jerk_sig_pow
     real(dp) :: obs_cart(6), tgt_cart(6), tgt_pol(3), t, tmax, rough_fac, neff_thresh, neff_pass, neff0, &
-                meas(3), est_cart(6), est_pol(3), meas_sig_fac, &
+                meas(3), est_cart(6), est_pol(3), meas_sig_fac, jerk_sig, &
                 x_err(max_trials), y_err(max_trials), pos_err(max_trials), &
                 vx_err(max_trials), vy_err(max_trials), vel_err(max_trials), &
                 ax_err(max_trials), ay_err(max_trials), acc_err(max_trials), &
@@ -473,9 +472,10 @@ implicit none
     real(dp), allocatable :: cartesian_particles(:,:), weights(:), polar_particles(:,:)
     character(len=1024) :: msg, fmtstr, resample_strategy
 
-    write(831,'(a)') 'num_particles,init_meas_sig,resampling_method,rough_fac,neff_thresh,tmax_sec,downrange_nmi,spd_mach,'// &
+    write(831,'(a)') 'num_particles,init_meas_sig,resampling_method,jerk_sig,rough_fac,neff_thresh,'// &
+                     'tmax_sec,downrange_nmi,spd_mach,'// &
                      'rmse_rng,rmse_ang,rmse_rngrt,rmse_x,rmse_y,rmse_vx,rmse_vy,rmse_ax,rmse_ay,rmse_pos,rmse_vel,rmse_acc'
-    do num_particles_ii=1,11,1
+    do num_particles_ii=11,31,10
         num_particles = 10**(num_particles_ii/10)*1000*mod(num_particles_ii,10)
         if (num_particles == 0) cycle
         if (allocated(cartesian_particles)) deallocate(cartesian_particles)
@@ -484,10 +484,12 @@ implicit none
         allocate(cartesian_particles(size(obs_cart),num_particles), weights(num_particles), polar_particles(3,num_particles))
     do init_meas_sig=3,3 !! multiply meas_sig by init_meas_sig for particle initialization
         meas_sig_fac = real(init_meas_sig, kind=dp)
-    do neff_pass_int=5,100,5 !! respample when Neff is 5-100% of num_particles
-        neff_thresh = real(neff_pass_int, kind=dp)/100.0_dp
-        neff_pass = neff_thresh*num_particles
-        neff0 = num_particles
+    do jerk_sig_pow=-1,-4,-1 !! sigma used for random jerk in propagation step                                        
+        jerk_sig = 10.0_dp**jerk_sig_pow*g                                                                            
+    do neff_pass_int=40,60,5 !! respample when Neff is 5-100% of num_particles                                        
+        neff_thresh = real(neff_pass_int, kind=dp)/100.0_dp                                                           
+        neff_pass = neff_thresh*num_particles                                                                         
+        neff0 = num_particles                                                                                         
     do rough_fac_int=5,100,5 !! scaling Neff**(-1/(d+4))
         rough_fac = real(rough_fac_int, kind=dp)/100.0_dp
     do resampling_method=1,4 !! simple select case on method used
@@ -594,6 +596,7 @@ implicit none
         ax_err(trial) = tgt_cart(5) - est_cart(5)
         ay_err(trial) = tgt_cart(6) - est_cart(6)
         pos_err(trial) = sqrt((tgt_cart(1) - est_cart(1))**2 + (tgt_cart(2) - est_cart(2))**2)
+        if (.not.(nearly(pos_err(trial), pos_err(trial)))) tmax = -1.0_dp
         vel_err(trial) = sqrt((tgt_cart(3) - est_cart(3))**2 + (tgt_cart(4) - est_cart(4))**2)
         acc_err(trial) = sqrt((tgt_cart(5) - est_cart(5))**2 + (tgt_cart(6) - est_cart(6))**2)
         if (debug) then
@@ -626,23 +629,26 @@ implicit none
     end do
     !$omp end parallel do
         !! trials done
-        fmtstr = '(2(i0,","),a,",",2(f0.4,","),f0.1,",",2(i0,","),11(e13.6,","),e13.6)'
+        fmtstr = '(2(i0,","),a,",",e13.6,",",2(f0.4,","),f0.1,",",2(i0,","),11(e13.6,","),e13.6)'
         if (all(nearly(pos_err, pos_err))) then
-            write(831,fmt=trim(fmtstr)) num_particles,init_meas_sig,trim(resample_strategy),rough_fac,neff_thresh,tmax,dr,spd, &
+            write(831,fmt=trim(fmtstr)) num_particles,init_meas_sig,trim(resample_strategy),jerk_sig,rough_fac,neff_thresh, &
+                                  tmax,dr,spd, &
                                   rmse(rng_err,0.0_dp),rmse(ang_err,0.0_dp),rmse(rngrt_err,0.0_dp), &
                                   rmse(x_err,0.0_dp),rmse(y_err,0.0_dp), &
                                   rmse(vx_err,0.0_dp),rmse(vy_err,0.0_dp), &
                                   rmse(ax_err,0.0_dp),rmse(ay_err,0.0_dp), &
                                   rmse(pos_err,0.0_dp),rmse(vel_err,0.0_dp),rmse(acc_err,0.0_dp)
         else
-            error stop 'bad run'
+            error stop 'nan should not happen'
         end if
-        write(*,'(2(a,i0),a,a10,a,f5.3,a,f4.2,a,f5.1,a,e13.6)') 'particles: ',num_particles,', init_meas_sig: ',init_meas_sig, &
-                                                                ', ',trim(resample_strategy), &
-                                                                ', rough_fac: ',rough_fac, &
-                                                                ', neff_thresh: ',neff_thresh, &
-                                                                ', tmax: ',tmax, &
-                                                                ', rmse pos_err: ',rmse(pos_err,0.0_dp)
+        fmtstr = '(2(a,i0),a,a10,a,e13.6,2(a,f0.2),a,f0.1,a,e13.6)'
+        write(*,fmtstr) 'particles: ',num_particles,', init_meas_sig: ',init_meas_sig, &
+                        ', ',trim(resample_strategy), &
+                        ', jerk_sig: ',jerk_sig, &
+                        ', rough_fac: ',rough_fac,', neff_thresh: ',neff_thresh, &
+                        ', tmax: ',tmax, &
+                        ', rmse pos_err: ',rmse(pos_err,0.0_dp)
+    end do
     end do
     end do
     end do
