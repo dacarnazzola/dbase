@@ -465,6 +465,8 @@ contains
         integer(kind=i64) :: ndims, i, j
         real(kind=sp) :: x_row(size(x, dim=2, kind=i64)), u, x_centered(size(x, dim=2, kind=i64),size(x, dim=1, kind=i64)), &
                          nsamples_1
+        call debug_error_condition(logical(size(x, dim=2, kind=i64) < 2_i64, kind=c_bool), &
+                                   'module STATISTICS :: cov subroutine invalid for array with dim=2 < 2')
         ndims = size(x, dim=1, kind=i64)
         do i=1_i64,ndims
             x_row = x(i,:)
@@ -493,6 +495,8 @@ contains
         integer(kind=i64) :: ndims, i, j
         real(kind=dp) :: x_row(size(x, dim=2, kind=i64)), u, x_centered(size(x, dim=2, kind=i64),size(x, dim=1, kind=i64)), &
                          nsamples_1
+        call debug_error_condition(logical(size(x, dim=2, kind=i64) < 2_i64, kind=c_bool), &
+                                   'module STATISTICS :: cov subroutine invalid for array with dim=2 < 2')
         ndims = size(x, dim=1, kind=i64)
         do i=1_i64,ndims
             x_row = x(i,:)

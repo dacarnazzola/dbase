@@ -15,12 +15,21 @@ private
     real(dp), parameter :: ft2nmi = 12.0_dp*2.54_dp/100.0_dp/1852.0_dp
     real(dp), parameter :: g = 32.2_dp
 
+    interface
+        impure subroutine resample_cartesian_particles(n, cartesian_particles, weights)
+        import dp
+        implicit none
+            integer, intent(in) :: n
+            real(dp), intent(inout) :: cartesian_particles(:,:), weights(:)
+        end
+    end interface
+
     public :: debug, dp, nmi2ft, ft2nmi, deg2rad_dp, rad2deg_dp, g, pi_dp, twopi_dp, &
               perfect_cart2pol, generate_measurements, initialize_particles, convert_particles_cart2pol, &
               generate_state_estimate, calculate_weights, apply_roughening, &
-              resample_systematic, resample_multinomial, resample_residual, resample_stratified, &
+              resample_cartesian_particles, resample_systematic, resample_multinomial, resample_residual, resample_stratified, &
               fly_constant_acceleration, propagate_particles, apply_constraints, &
-              rmse, neff, print_summary, &
+              rmse, neff, &
               avg, std, nearly
 
 contains
@@ -372,78 +381,6 @@ contains
         val = 1.0_dp/dsum(weights2)
     end
 
-    impure subroutine print_summary(msg, t, obs_cart, tgt_cart, n, cartesian_particles, weights)
-        character(len=*), intent(in) :: msg
-        real(dp), intent(in) :: t, obs_cart(:), tgt_cart(size(obs_cart))
-        integer, intent(in) :: n
-        real(dp), intent(in) :: cartesian_particles(size(obs_cart),n), weights(n)
-        real(dp) :: tgt_pol(3), tgt_spd, tgt_acc, cart_spd(n), cart_acc(n), &
-                    polar_particles(3,n), est_cart(size(obs_cart)), est_pol(3), pos_err, vel_err, acc_err
-        call perfect_cart2pol(obs_cart, tgt_cart, tgt_pol)
-        call convert_particles_cart2pol(obs_cart, n, cartesian_particles, polar_particles)
-        call generate_state_estimate(est_cart, n, cartesian_particles, weights)
-        call generate_state_estimate(est_pol, n, polar_particles, weights)
-        tgt_spd = sqrt(tgt_cart(3)**2 + tgt_cart(4)**2)
-        tgt_acc = sqrt(tgt_cart(5)**2 + tgt_cart(6)**2)
-        cart_spd = sqrt(sum(cartesian_particles(3:4,:)**2, dim=1))
-        cart_acc = sqrt(sum(cartesian_particles(5:6,:)**2, dim=1))
-        pos_err = sqrt((tgt_cart(1) - est_cart(1))**2 + (tgt_cart(2) - est_cart(2))**2)
-        vel_err = sqrt((tgt_cart(3) - est_cart(3))**2 + (tgt_cart(4) - est_cart(4))**2)
-        acc_err = sqrt((tgt_cart(5) - est_cart(5))**2 + (tgt_cart(6) - est_cart(6))**2)
-        write(*,'(a)') repeat('=', 32)
-        write(*,'(a)') msg
-        write(*,'(a,f0.1,a,f10.1,a,3(f0.1,a))') 't: ',t,', neff: ',neff(weights), &
-                                                ', pos_err: ',pos_err,' ft'// &
-                                                ', vel_err: ',vel_err,' ft/sec'// &
-                                                ', acc_err: ',acc_err,' ft/sec**2'
-        write(*,'(5a26)') 'Quantity / ','Truth / ','Particle EST / ','Particle STD / ','Particle RMSE / '
-        write(*,'(a26,3(f23.4,a3),f23.4)') 'range [NMI]: ',tgt_pol(1)*ft2nmi,' / ', &
-                                                           est_pol(1)*ft2nmi,' / ', &
-                                                           std(polar_particles(1,:))*ft2nmi,' / ', &
-                                                           rmse(polar_particles(1,:), tgt_pol(1))*ft2nmi
-        write(*,'(a26,3(f23.4,a3),f23.4)') 'bearing angle [DEG]: ',tgt_pol(2)*rad2deg_dp,' / ', &
-                                                                   est_pol(2)*rad2deg_dp,' / ', &
-                                                                   std(polar_particles(2,:))*rad2deg_dp,' / ', &
-                                                                   rmse(polar_particles(2,:), tgt_pol(2))*rad2deg_dp
-        write(*,'(a26,3(f23.4,a3),f23.4)') 'range-rate [FT/SEC]: ',tgt_pol(3),' / ', &
-                                                                   est_pol(3),' / ', &
-                                                                   std(polar_particles(3,:)),' / ', &
-                                                                   rmse(polar_particles(3,:), tgt_pol(3))
-        write(*,'(a26,3(f23.4,a3),f23.4)') 'x [NMI]: ',tgt_cart(1)*ft2nmi,' / ', &
-                                                       est_cart(1)*ft2nmi,' / ', &
-                                                       std(cartesian_particles(1,:))*ft2nmi,' / ', &
-                                                       rmse(cartesian_particles(1,:), tgt_cart(1))*ft2nmi
-        write(*,'(a26,3(f23.4,a3),f23.4)') 'y [NMI]: ',tgt_cart(2)*ft2nmi,' / ', &
-                                                       est_cart(2)*ft2nmi,' / ', &
-                                                       std(cartesian_particles(2,:))*ft2nmi,' / ', &
-                                                       rmse(cartesian_particles(2,:), tgt_cart(2))*ft2nmi
-        write(*,'(a26,3(f23.4,a3),f23.4)') 'vx [FT/SEC]: ',tgt_cart(3),' / ', &
-                                                           est_cart(3),' / ', &
-                                                           std(cartesian_particles(3,:)),' / ', &
-                                                           rmse(cartesian_particles(3,:), tgt_cart(3))
-        write(*,'(a26,3(f23.4,a3),f23.4)') 'vy [FT/SEC]: ',tgt_cart(4),' / ', &
-                                                           est_cart(4),' / ', &
-                                                           std(cartesian_particles(4,:)),' / ', &
-                                                           rmse(cartesian_particles(4,:), tgt_cart(4))
-        write(*,'(a26,3(f23.4,a3),f23.4)') 'speed [FT/SEC]: ',tgt_spd,' / ', &
-                                                              vdot(cart_spd, weights),' / ', &
-                                                              std(cart_spd),' / ', &
-                                                              rmse(cart_spd, tgt_spd)
-        write(*,'(a26,3(f23.4,a3),f23.4)') 'ax [FT/SEC**2]: ',tgt_cart(5),' / ', &
-                                                              est_cart(5),' / ', &
-                                                              std(cartesian_particles(5,:)),' / ', &
-                                                              rmse(cartesian_particles(5,:), tgt_cart(5))
-        write(*,'(a26,3(f23.4,a3),f23.4)') 'ay [FT/SEC**2]: ',tgt_cart(6),' / ', &
-                                                              est_cart(6),' / ', &
-                                                              std(cartesian_particles(6,:)),' / ', &
-                                                              rmse(cartesian_particles(6,:), tgt_cart(6))
-        write(*,'(a26,3(f23.4,a3),f23.4)') 'acceleration [FT/SEC**2]: ',tgt_acc,' / ', &
-                                                                        vdot(cart_acc, weights),' / ', &
-                                                                        std(cart_acc),' / ', &
-                                                                        rmse(cart_acc, tgt_acc)
-        write(*,'(a)') repeat('=', 32)
-    end
-
 end module pf
 
 
@@ -451,7 +388,7 @@ program ex_particle_filter
 use, non_intrinsic :: pf
 implicit none
 
-    integer, parameter :: max_trials = 10
+    integer, parameter :: max_trials = 128
     real(dp), parameter :: max_rng   = 500.0_dp*nmi2ft, &
                            max_spd   = 10000.0_dp, &
                            max_acc   = 9.0_dp*g, &
@@ -461,6 +398,7 @@ implicit none
 !                           meas_sig(3) = [1.0_dp, 0.001_dp, 1.0_dp] ! exquisite measurements
 !                           meas_sig(3) = [-1.0_dp, 0.1_dp*deg2rad_dp, -1.0_dp] ! bearing only
 
+    procedure(resample_cartesian_particles), pointer :: resample_subroutine
     integer :: dr, tmax_int, spd, rough_fac_int, neff_pass_int, num_particles, trial, num_particles_ii, init_meas_sig, &
                resampling_method, jerk_sig_pow
     real(dp) :: obs_cart(6), tgt_cart(6), tgt_pol(3), t, tmax, rough_fac, neff_thresh, neff_pass, neff0, &
@@ -470,23 +408,23 @@ implicit none
                 ax_err(max_trials), ay_err(max_trials), acc_err(max_trials), &
                 rng_err(max_trials), ang_err(max_trials), rngrt_err(max_trials)
     real(dp), allocatable :: cartesian_particles(:,:), weights(:), polar_particles(:,:)
-    character(len=1024) :: msg, fmtstr, resample_strategy
+    character(len=1024) :: fmtstr, resample_strategy
 
     write(831,'(a)') 'num_particles,init_meas_sig,resampling_method,jerk_sig,rough_fac,neff_thresh,'// &
                      'tmax_sec,downrange_nmi,spd_mach,'// &
                      'rmse_rng,rmse_ang,rmse_rngrt,rmse_x,rmse_y,rmse_vx,rmse_vy,rmse_ax,rmse_ay,rmse_pos,rmse_vel,rmse_acc'
-    do num_particles_ii=11,31,10
+    do num_particles_ii=1,11,1
         num_particles = 10**(num_particles_ii/10)*1000*mod(num_particles_ii,10)
         if (num_particles == 0) cycle
         if (allocated(cartesian_particles)) deallocate(cartesian_particles)
         if (allocated(weights)) deallocate(weights)
         if (allocated(polar_particles)) deallocate(polar_particles)
         allocate(cartesian_particles(size(obs_cart),num_particles), weights(num_particles), polar_particles(3,num_particles))
-    do init_meas_sig=3,3 !! multiply meas_sig by init_meas_sig for particle initialization
+    do init_meas_sig=1,6 !! multiply meas_sig by init_meas_sig for particle initialization
         meas_sig_fac = real(init_meas_sig, kind=dp)
     do jerk_sig_pow=-1,-4,-1 !! sigma used for random jerk in propagation step                                        
         jerk_sig = 10.0_dp**jerk_sig_pow*g                                                                            
-    do neff_pass_int=40,60,5 !! respample when Neff is 5-100% of num_particles                                        
+    do neff_pass_int=5,100,5 !! respample when Neff is 5-100% of num_particles                                        
         neff_thresh = real(neff_pass_int, kind=dp)/100.0_dp                                                           
         neff_pass = neff_thresh*num_particles                                                                         
         neff0 = num_particles                                                                                         
@@ -496,20 +434,24 @@ implicit none
         select case (resampling_method)
             case (1)
                 resample_strategy = 'systematic'
+                resample_subroutine => resample_systematic
             case (2)
                 resample_strategy = 'multinomial'
+                resample_subroutine => resample_multinomial
             case (3)
                 resample_strategy = 'residual'
+                resample_subroutine => resample_residual
             case (4)
                 resample_strategy = 'stratified'
+                resample_subroutine => resample_stratified
             case default
                 error stop 'not implemented yet'
         end select
-    do tmax_int=200,200 !! performance should increase with tmax until target passes max_spd
+    do tmax_int=3,10 !! performance should increase with tmax until target passes max_spd
         tmax = real(tmax_int, kind=dp)
         t = 0.0_dp
     do dr=250,250 !! NMI
-    do spd=3,3    !! ~Mach
+    do spd=3,3 !! ~Mach
     !$omp parallel do default(firstprivate) shared(x_err, y_err, vx_err, vy_err, ax_err, ay_err, pos_err, vel_err, acc_err, &
     !$omp&                                         rng_err, ang_err, rngrt_err)
     do trial=1,max_trials
@@ -524,31 +466,12 @@ implicit none
         call generate_measurements(obs_cart, tgt_cart, meas_sig, max_rng, max_spd, 1, meas)
         call initialize_particles(obs_cart, meas, meas_sig_fac*meas_sig, max_rng, max_spd, &
                                   num_particles, cartesian_particles, weights)
-        if (debug) then
-            call convert_particles_cart2pol(obs_cart, num_particles, cartesian_particles, polar_particles)
-            call calculate_weights(tgt_pol, meas_sig, num_particles, polar_particles, weights)
-            call print_summary('Initialization Complete', t, obs_cart, tgt_cart, num_particles, cartesian_particles, weights)
-            !! reset weights to 1/num_particles
-            weights = 1.0_dp/real(num_particles,dp)
-            write(*,'(i0,a,f0.6,a,3(f0.1," "))') num_particles,' particles with jerk_sig ',jerk_sig, &
-                                                 ' vs target RNG[NMI]/SPD[FT/SEC]/ANG[DEG]: ', &
-                                                 tgt_pol(1)*ft2nmi, &
-                                                 sqrt(tgt_cart(3)**2 + tgt_cart(4)**2), &
-                                                 tgt_pol(2)*rad2deg_dp
-            write(*,'(7(a,f0.1),a)') '   START TRUTH t: ',t, &
-                                     ' :: x: ',tgt_cart(1)*ft2nmi,' NMI'// &
-                                     ', y: ',tgt_cart(2)*ft2nmi,' NMI'//  &
-                                     ', vx: ',tgt_cart(3),' ft/sec'// &
-                                     ', vy: ',tgt_cart(4),' ft/sec'// &
-                                     ', ax: ',tgt_cart(5),' ft/sec**2'// &
-                                     ', ay: ',tgt_cart(6),' ft/sec**2'
-        end if
         t = 0.0_dp
         do while (t < tmax)
             !! advance time and target independent of anything else
             t = t + dt
             call fly_constant_acceleration(tgt_cart, dt, huge(max_spd))
-            call fly_constant_acceleration(obs_cart, dt, max_spd)
+            call fly_constant_acceleration(obs_cart, dt, huge(max_spd))
             !! update tgt_pol
             call perfect_cart2pol(obs_cart, tgt_cart, tgt_pol)
             !! generate new measurement from observer perspective
@@ -561,27 +484,9 @@ implicit none
             call calculate_weights(meas, meas_sig, num_particles, polar_particles, weights)
             neff0 = neff(weights)
             if (neff0 < neff_pass) then
-                msg = 'particles resampled'
-                select case (resampling_method)
-                    case (1)
-                        call resample_systematic(num_particles, cartesian_particles, weights)
-                    case (2)
-                        call resample_multinomial(num_particles, cartesian_particles, weights)
-                    case (3)
-                        call resample_residual(num_particles, cartesian_particles, weights)
-                    case (4)
-                        call resample_stratified(num_particles, cartesian_particles, weights)
-                    case default
-                        write(*,*) 'resampling method: ',resampling_method
-                        error stop 'not implemented'
-                end select
+                call resample_subroutine(num_particles, cartesian_particles, weights)
                 call apply_roughening(rough_fac*neff0**(-1.0_dp/(size(cartesian_particles,dim=1)+4)), &
                                       num_particles, cartesian_particles)
-            else
-                msg = 'tracking update'
-            end if
-            if (debug) then
-                call print_summary(trim(msg), t, obs_cart, tgt_cart, num_particles, cartesian_particles, weights)
             end if
         end do
         call generate_state_estimate(est_pol, num_particles, polar_particles, weights)
@@ -596,36 +501,8 @@ implicit none
         ax_err(trial) = tgt_cart(5) - est_cart(5)
         ay_err(trial) = tgt_cart(6) - est_cart(6)
         pos_err(trial) = sqrt((tgt_cart(1) - est_cart(1))**2 + (tgt_cart(2) - est_cart(2))**2)
-        if (.not.(nearly(pos_err(trial), pos_err(trial)))) tmax = -1.0_dp
         vel_err(trial) = sqrt((tgt_cart(3) - est_cart(3))**2 + (tgt_cart(4) - est_cart(4))**2)
         acc_err(trial) = sqrt((tgt_cart(5) - est_cart(5))**2 + (tgt_cart(6) - est_cart(6))**2)
-        if (debug) then
-            write(*,'(a,f0.1,a,f0.3,a,f0.3,a,f0.1,a,f0.1,a)') 'MEAS_SIG: ', &                      !! a
-                                                               meas_sig(1),' ft (', &              !! f0.1,a
-                                                               meas_sig(1)*ft2nmi,' NMI), ', &     !! f0.3,a
-                                                               meas_sig(2)*rad2deg_dp,' deg (', &  !! f0.3,a
-                                                               meas_sig(2)*1000.0_dp,' mrad), ', & !! f0.1,a
-                                                               meas_sig(3),' ft/sec'               !! f0.1,a
-            write(*,'(7(a,f0.1),a)') '   FINAL TRUTH t: ',t, &
-                                     ' :: x: ',tgt_cart(1)*ft2nmi,' NMI'// &
-                                     ', y: ',tgt_cart(2)*ft2nmi,' NMI'//  &
-                                     ', vx: ',tgt_cart(3),' ft/sec'// &
-                                     ', vy: ',tgt_cart(4),' ft/sec'// &
-                                     ', ax: ',tgt_cart(5),' ft/sec**2'// &
-                                     ', ay: ',tgt_cart(6),' ft/sec**2'
-            write(*,'(7(a,f0.1),a)') 'STATE ESTIMATE t: ',t, &
-                                     ' :: x: ',est_cart(1)*ft2nmi,' NMI'// &
-                                     ', y: ',est_cart(2)*ft2nmi,' NMI'//  &
-                                     ', vx: ',est_cart(3),' ft/sec'// &
-                                     ', vy: ',est_cart(4),' ft/sec'// &
-                                     ', ax: ',est_cart(5),' ft/sec**2'// &
-                                     ', ay: ',est_cart(6),' ft/sec**2'
-            write(*,'(a,f0.1,a,f10.1,a,3(f0.1,a))') '               t: ',t,', neff: ',neff(weights), &
-                                                                 ', pos_err: ',pos_err(trial),' ft'// &
-                                                                 ', vel_err: ',vel_err(trial),' ft/sec'// &
-                                                                 ', acc_err: ',acc_err(trial),' ft/sec**2'
-            write(*,*) ''
-        end if
     end do
     !$omp end parallel do
         !! trials done
@@ -641,7 +518,7 @@ implicit none
         else
             error stop 'nan should not happen'
         end if
-        fmtstr = '(2(a,i0),a,a10,a,e13.6,2(a,f0.2),a,f0.1,a,e13.6)'
+        fmtstr = '(2(a,i0),a,a11,a,e13.6,2(a,f0.2),a,f0.1,a,e13.6)'
         write(*,fmtstr) 'particles: ',num_particles,', init_meas_sig: ',init_meas_sig, &
                         ', ',trim(resample_strategy), &
                         ', jerk_sig: ',jerk_sig, &
