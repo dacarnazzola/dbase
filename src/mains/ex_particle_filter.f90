@@ -1,14 +1,14 @@
 module pf
 use, non_intrinsic :: kinds, only: dp
 use, non_intrinsic :: constants, only: pi_dp, twopi_dp, deg2rad_dp, rad2deg_dp, eps_dp
-use, non_intrinsic :: random, only: random_normal, random_uniform
+use, non_intrinsic :: random, only: random_normal, random_uniform, random_log_uniform
 use, non_intrinsic :: statistics, only: dsum, avg, std, cumsum, cov, normalize
 use, non_intrinsic :: vector_math, only: vdot
 use, non_intrinsic :: system, only: debug_error_condition, nearly
 implicit none
 private
 
-    logical, parameter :: debug = .false.
+    logical, parameter :: debug = .true.
     
     real(dp), parameter :: global_minimum_range = 1.0_dp
     real(dp), parameter :: nmi2ft = 1852.0_dp*100.0_dp/2.54_dp/12.0_dp
@@ -16,11 +16,11 @@ private
     real(dp), parameter :: g = 32.2_dp
 
     interface
-        impure subroutine resample_cartesian_particles(n, cartesian_particles, weights)
+        impure subroutine resample_cartesian_particles(n, cartesian_particles, weights, jerk_sig)
         import dp
         implicit none
             integer, intent(in) :: n
-            real(dp), intent(inout) :: cartesian_particles(:,:), weights(:)
+            real(dp), intent(inout) :: cartesian_particles(:,:), weights(:), jerk_sig(:)
         end
     end interface
 
@@ -105,14 +105,16 @@ contains
         end if
     end
 
-    impure subroutine initialize_particles(obs_cart, meas, meas_sig, tgt_max_rng, tgt_max_spd, n, cartesian_particles, weights)
+    impure subroutine initialize_particles(obs_cart, meas, meas_sig, tgt_max_rng, tgt_max_spd, n, &
+                                           cartesian_particles, weights, jerk_sig)
         real(dp), intent(in) :: obs_cart(:), meas(3), meas_sig(3), tgt_max_rng, tgt_max_spd
         integer, intent(in) :: n
-        real(dp), intent(out) :: cartesian_particles(size(obs_cart),n), weights(n)
+        real(dp), intent(out) :: cartesian_particles(size(obs_cart),n), weights(n), jerk_sig(n)
         real(dp) :: polar_measurements(3,n), tgt_spd_scale(n), ax(n), ay(n)
         integer :: i
         call resample_measurements(meas, meas_sig, tgt_max_rng, tgt_max_spd, n, polar_measurements)
-        call random_uniform(tgt_spd_scale, 0.0_dp, 1.0_dp)
+        call random_log_uniform(tgt_spd_scale, 1.0_dp/tgt_max_spd, 1.0_dp)
+        call random_log_uniform(jerk_sig, 0.0001_dp*g, 0.1_dp*g)
         !! assume 6 cartesian states correspond to [x, y, vx, vy, ax, ay]
         if (size(obs_cart) == 6) then
             !! sample acceleration ax and ay from N(0,1)
@@ -120,7 +122,7 @@ contains
             call random_normal(ay, 0.0_dp, 1.0_dp*g)
         end if
         do concurrent (i=1:n)
-            call pol2cart_inner(obs_cart, tgt_max_rng, tgt_max_spd, tgt_spd_scale(i), &
+            call pol2cart_inner(obs_cart, tgt_max_rng, tgt_max_spd, (-1)**mod(i,2)*tgt_spd_scale(i), &
                                 polar_measurements(:,i), cartesian_particles(:,i))
             if (size(obs_cart) == 6) then
                 cartesian_particles(5,i) = ax(i)
@@ -190,13 +192,15 @@ contains
         weights = weights/dsum(weights)
     end
 
-    impure subroutine resample_systematic(n, cartesian_particles, weights)
+    impure subroutine resample_systematic(n, cartesian_particles, weights, jerk_sig)
         integer, intent(in) :: n
-        real(dp), intent(inout) :: cartesian_particles(:,:), weights(:)
-        real(dp) :: u(1), inv_n, new_particles(size(cartesian_particles,dim=1),size(cartesian_particles,dim=2))
+        real(dp), intent(inout) :: cartesian_particles(:,:), weights(:), jerk_sig(:)
+        real(dp) :: u(1), inv_n, new_particles(size(cartesian_particles,dim=1),size(cartesian_particles,dim=2)), &
+                    new_jerk_sig(size(jerk_sig))
         integer :: i, j
         call debug_error_condition(size(cartesian_particles, dim=2) /= n, 'mismatch in cartesian_particles shape')
         call debug_error_condition(size(weights) /= n, 'size of weights array needs to match n')
+        call debug_error_condition(size(jerk_sig) /= n, 'size of jerk_sig array needs to match n')
         call cumsum(weights)
         weights(n) = 1.0_dp
         inv_n = 1.0_dp/real(n, kind=dp)
@@ -207,19 +211,23 @@ contains
                 j = j + 1
             end do
             new_particles(:,i) = cartesian_particles(:,j)
+            new_jerk_sig(i) = jerk_sig(j)
             u = u + inv_n
         end do
         cartesian_particles = new_particles
+        jerk_sig = new_jerk_sig
         weights = inv_n
     end
 
-    impure subroutine resample_multinomial(n, cartesian_particles, weights)
+    impure subroutine resample_multinomial(n, cartesian_particles, weights, jerk_sig)
         integer, intent(in) :: n
-        real(dp), intent(inout) :: cartesian_particles(:,:), weights(:)
-        real(dp) :: u(n), inv_n, new_particles(size(cartesian_particles,dim=1),size(cartesian_particles,dim=2))
+        real(dp), intent(inout) :: cartesian_particles(:,:), weights(:), jerk_sig(:)
+        real(dp) :: u(n), inv_n, new_particles(size(cartesian_particles,dim=1),size(cartesian_particles,dim=2)), &
+                    new_jerk_sig(size(jerk_sig))
         integer :: i, j
         call debug_error_condition(size(cartesian_particles, dim=2) /= n, 'mismatch in cartesian_particles shape')
         call debug_error_condition(size(weights) /= n, 'size of weights array needs to match n')
+        call debug_error_condition(size(jerk_sig) /= n, 'size of jerk_sig array needs to match n')
         call cumsum(weights)
         weights(n) = 1.0_dp
         call random_uniform(u, 0.0_dp, 1.0_dp)
@@ -229,25 +237,30 @@ contains
                 j = j + 1
             end do
             new_particles(:,i) = cartesian_particles(:,j)
+            new_jerk_sig(i) = jerk_sig(j)
         end do
         cartesian_particles = new_particles
+        jerk_sig = new_jerk_sig
         inv_n = 1.0_dp/real(n, kind=dp)
         weights = inv_n
     end
 
-    impure subroutine resample_residual(n, cartesian_particles, weights)
+    impure subroutine resample_residual(n, cartesian_particles, weights, jerk_sig)
         integer, intent(in) :: n
-        real(dp), intent(inout) :: cartesian_particles(:,:), weights(:)
-        real(dp) :: inv_n, new_particles(size(cartesian_particles,dim=1),size(cartesian_particles,dim=2)), resamples(n), u(n)
+        real(dp), intent(inout) :: cartesian_particles(:,:), weights(:), jerk_sig(:)
+        real(dp) :: inv_n, new_particles(size(cartesian_particles,dim=1),size(cartesian_particles,dim=2)), resamples(n), u(n), &
+                    new_jerk_sig(size(jerk_sig))
         integer :: i, resamples_int, j, k
         call debug_error_condition(size(cartesian_particles, dim=2) /= n, 'mismatch in cartesian_particles shape')
         call debug_error_condition(size(weights) /= n, 'size of weights array needs to match n')
+        call debug_error_condition(size(jerk_sig) /= n, 'size of jerk_sig array needs to match n')
         resamples = weights*n
         j = 1
         do i=1,n
             resamples_int = floor(resamples(i))
             do k=1,resamples_int
                 new_particles(:,j) = cartesian_particles(:,i)
+                new_jerk_sig(j) = jerk_sig(i)
                 j = j + 1
             end do
         end do
@@ -263,17 +276,20 @@ contains
                     k = k + 1
                 end do
                 new_particles(:,i+j-1) = cartesian_particles(:,k)
+                new_jerk_sig(i+j-1) = jerk_sig(k)
             end do
         end if
         cartesian_particles = new_particles
+        jerk_sig = new_jerk_sig
         inv_n = 1.0_dp/real(n, kind=dp)
         weights = inv_n
     end
 
-    impure subroutine resample_stratified(n, cartesian_particles, weights)
+    impure subroutine resample_stratified(n, cartesian_particles, weights, jerk_sig)
         integer, intent(in) :: n
-        real(dp), intent(inout) :: cartesian_particles(:,:), weights(:)
-        real(dp) :: u(n), inv_n, new_particles(size(cartesian_particles,dim=1),size(cartesian_particles,dim=2))
+        real(dp), intent(inout) :: cartesian_particles(:,:), weights(:), jerk_sig(:)
+        real(dp) :: u(n), inv_n, new_particles(size(cartesian_particles,dim=1),size(cartesian_particles,dim=2)), &
+                    new_jerk_sig(size(jerk_sig))
         integer :: i, j
         call debug_error_condition(size(cartesian_particles, dim=2) /= n, 'mismatch in cartesian_particles shape')
         call debug_error_condition(size(weights) /= n, 'size of weights array needs to match n')
@@ -290,8 +306,10 @@ contains
                 j = j + 1
             end do
             new_particles(:,i) = cartesian_particles(:,j)
+            new_jerk_sig(i) = jerk_sig(j)
         end do
         cartesian_particles = new_particles
+        jerk_sig = new_jerk_sig
         weights = inv_n
     end
 
@@ -322,18 +340,21 @@ contains
         cart6_state(1:2) = cart6_state(1:2) + dt*cart6_state(3:4)
     end
 
-    impure subroutine propagate_particles(dt, jerk_sig, max_spd, max_acc, n, cartesian_particles)
-        real(dp), intent(in) :: dt, jerk_sig, max_spd, max_acc
+    impure subroutine propagate_particles(dt, max_spd, max_acc, n, cartesian_particles, jerk_sig)
+        real(dp), intent(in) :: dt, max_spd, max_acc
         integer, intent(in) :: n
         real(dp), intent(inout) :: cartesian_particles(:,:)
-        real(dp) :: jx(n), jy(n), acc_scale
+        real(dp), intent(in) :: jerk_sig(:)
+        real(dp) :: jxjy(2,n), acc_scale
         integer :: i
         call debug_error_condition(size(cartesian_particles, dim=2) /= n, 'mismatch in cartesian_particles shape')
-        call random_normal(jx, 0.0_dp, jerk_sig)
-        call random_normal(jy, 0.0_dp, jerk_sig)
+        call debug_error_condition(size(jerk_sig) /= n, 'mismatch in jerk_sig shape')
+        do i=1,n
+            call random_normal(jxjy(:,i), 0.0_dp, jerk_sig(i))
+        end do
         do concurrent (i=1:n)
-            cartesian_particles(5,i) = cartesian_particles(5,i) + jx(i)
-            cartesian_particles(6,i) = cartesian_particles(6,i) + jy(i)
+            cartesian_particles(5,i) = cartesian_particles(5,i) + jxjy(1,i)
+            cartesian_particles(6,i) = cartesian_particles(6,i) + jxjy(2,i)
             acc_scale = max(1.0_dp, sqrt(cartesian_particles(5,i)**2 + cartesian_particles(6,i)**2)/max_acc)
             cartesian_particles(5:6,i) = cartesian_particles(5:6,i)/acc_scale
             call fly_constant_acceleration(cartesian_particles(:,i), dt, max_spd)
@@ -400,37 +421,39 @@ implicit none
 
     procedure(resample_cartesian_particles), pointer :: resample_subroutine
     integer :: dr, tmax_int, spd, rough_fac_int, neff_pass_int, num_particles, trial, num_particles_ii, init_meas_sig, &
-               resampling_method, jerk_sig_pow
+               resampling_method
     real(dp) :: obs_cart(6), tgt_cart(6), tgt_pol(3), t, tmax, rough_fac, neff_thresh, neff_pass, neff0, &
-                meas(3), est_cart(6), est_pol(3), meas_sig_fac, jerk_sig, &
+                meas(3), est_cart(6), est_pol(3), meas_sig_fac, &
                 x_err(max_trials), y_err(max_trials), pos_err(max_trials), &
                 vx_err(max_trials), vy_err(max_trials), vel_err(max_trials), &
                 ax_err(max_trials), ay_err(max_trials), acc_err(max_trials), &
                 rng_err(max_trials), ang_err(max_trials), rngrt_err(max_trials)
-    real(dp), allocatable :: cartesian_particles(:,:), weights(:), polar_particles(:,:)
+    real(dp), allocatable :: cartesian_particles(:,:), weights(:), polar_particles(:,:), jerk_sig(:)
     character(len=1024) :: fmtstr, resample_strategy
 
-    write(831,'(a)') 'num_particles,init_meas_sig,resampling_method,jerk_sig,rough_fac,neff_thresh,'// &
+    write(831,'(a)') 'num_particles,init_meas_sig,resampling_method,rough_fac,neff_thresh,'// &
                      'tmax_sec,downrange_nmi,spd_mach,'// &
                      'rmse_rng,rmse_ang,rmse_rngrt,rmse_x,rmse_y,rmse_vx,rmse_vy,rmse_ax,rmse_ay,rmse_pos,rmse_vel,rmse_acc'
-    do num_particles_ii=1,11,1
+    do num_particles_ii=21,21,1
         num_particles = 10**(num_particles_ii/10)*1000*mod(num_particles_ii,10)
         if (num_particles == 0) cycle
         if (allocated(cartesian_particles)) deallocate(cartesian_particles)
         if (allocated(weights)) deallocate(weights)
         if (allocated(polar_particles)) deallocate(polar_particles)
-        allocate(cartesian_particles(size(obs_cart),num_particles), weights(num_particles), polar_particles(3,num_particles))
-    do init_meas_sig=1,6 !! multiply meas_sig by init_meas_sig for particle initialization
+        if (allocated(jerk_sig)) deallocate(jerk_sig)
+        allocate(cartesian_particles(size(obs_cart),num_particles), &
+                 weights(num_particles), &
+                 polar_particles(3,num_particles), &
+                 jerk_sig(num_particles))
+    do init_meas_sig=3,3 !! multiply meas_sig by init_meas_sig for particle initialization
         meas_sig_fac = real(init_meas_sig, kind=dp)
-    do jerk_sig_pow=-1,-4,-1 !! sigma used for random jerk in propagation step                                        
-        jerk_sig = 10.0_dp**jerk_sig_pow*g                                                                            
-    do neff_pass_int=5,100,5 !! respample when Neff is 5-100% of num_particles                                        
+    do neff_pass_int=5,50,5 !! respample when Neff is 5-100% of num_particles                                        
         neff_thresh = real(neff_pass_int, kind=dp)/100.0_dp                                                           
         neff_pass = neff_thresh*num_particles                                                                         
         neff0 = num_particles                                                                                         
-    do rough_fac_int=5,100,5 !! scaling Neff**(-1/(d+4))
+    do rough_fac_int=10,20,5 !! scaling Neff**(-1/(d+4))
         rough_fac = real(rough_fac_int, kind=dp)/100.0_dp
-    do resampling_method=1,4 !! simple select case on method used
+    do resampling_method=3,3 !! simple select case on method used
         select case (resampling_method)
             case (1)
                 resample_strategy = 'systematic'
@@ -447,14 +470,14 @@ implicit none
             case default
                 error stop 'not implemented yet'
         end select
-    do tmax_int=3,10 !! performance should increase with tmax until target passes max_spd
+    do tmax_int=200,200 !! performance should increase with tmax until target passes max_spd
         tmax = real(tmax_int, kind=dp)
         t = 0.0_dp
     do dr=250,250 !! NMI
-    do spd=3,3 !! ~Mach
+    loop_spd: do spd=3,3 !! ~Mach
     !$omp parallel do default(firstprivate) shared(x_err, y_err, vx_err, vy_err, ax_err, ay_err, pos_err, vel_err, acc_err, &
     !$omp&                                         rng_err, ang_err, rngrt_err)
-    do trial=1,max_trials
+    loop_trials: do trial=1,max_trials
         !! reset starting positions for each run
         obs_cart = 0.0_dp
         tgt_cart = 0.0_dp !! initialize all state components to zero (0.0)
@@ -465,7 +488,7 @@ implicit none
         call perfect_cart2pol(obs_cart, tgt_cart, tgt_pol)
         call generate_measurements(obs_cart, tgt_cart, meas_sig, max_rng, max_spd, 1, meas)
         call initialize_particles(obs_cart, meas, meas_sig_fac*meas_sig, max_rng, max_spd, &
-                                  num_particles, cartesian_particles, weights)
+                                  num_particles, cartesian_particles, weights, jerk_sig)
         t = 0.0_dp
         do while (t < tmax)
             !! advance time and target independent of anything else
@@ -477,14 +500,14 @@ implicit none
             !! generate new measurement from observer perspective
             call generate_measurements(obs_cart, tgt_cart, meas_sig, max_rng, max_spd, 1, meas)
             !! propagate current particles
-            call propagate_particles(dt, jerk_sig, max_spd, max_acc, num_particles, cartesian_particles)
+            call propagate_particles(dt, max_spd, max_acc, num_particles, cartesian_particles, jerk_sig)
             !! apply constraints and convert particles from cartesian to polar representation
             call apply_constraints(obs_cart, max_rng, max_spd, max_acc, num_particles, cartesian_particles, polar_particles)
             !! calculate weights, resample if Neff is below neff_pass (acceptable percentage of original num_particles)
             call calculate_weights(meas, meas_sig, num_particles, polar_particles, weights)
             neff0 = neff(weights)
             if (neff0 < neff_pass) then
-                call resample_subroutine(num_particles, cartesian_particles, weights)
+                call resample_subroutine(num_particles, cartesian_particles, weights, jerk_sig)
                 call apply_roughening(rough_fac*neff0**(-1.0_dp/(size(cartesian_particles,dim=1)+4)), &
                                       num_particles, cartesian_particles)
             end if
@@ -503,12 +526,24 @@ implicit none
         pos_err(trial) = sqrt((tgt_cart(1) - est_cart(1))**2 + (tgt_cart(2) - est_cart(2))**2)
         vel_err(trial) = sqrt((tgt_cart(3) - est_cart(3))**2 + (tgt_cart(4) - est_cart(4))**2)
         acc_err(trial) = sqrt((tgt_cart(5) - est_cart(5))**2 + (tgt_cart(6) - est_cart(6))**2)
-    end do
+        if (debug) then
+            fmtstr = '(2(a,i0),a,a11,2(a,f0.2),a,f0.1,a,e13.6)'
+            write(*,fmtstr) 'particles: ',num_particles,', init_meas_sig: ',init_meas_sig, &
+                            ', ',trim(resample_strategy), &
+                            ', rough_fac: ',rough_fac,', neff_thresh: ',neff_thresh, &
+                            ', tmax: ',tmax, &
+                            ', pos_err: ',pos_err(trial)
+            if (pos_err(trial) > 10000.0_dp) then
+                pos_err = huge(1.0_dp)
+                exit loop_trials
+            end if
+        end if
+    end do loop_trials
     !$omp end parallel do
         !! trials done
-        fmtstr = '(2(i0,","),a,",",e13.6,",",2(f0.4,","),f0.1,",",2(i0,","),11(e13.6,","),e13.6)'
+        fmtstr = '(2(i0,","),a,",",2(f0.4,","),f0.1,",",2(i0,","),11(e13.6,","),e13.6)'
         if (all(nearly(pos_err, pos_err))) then
-            write(831,fmt=trim(fmtstr)) num_particles,init_meas_sig,trim(resample_strategy),jerk_sig,rough_fac,neff_thresh, &
+            write(831,fmt=trim(fmtstr)) num_particles,init_meas_sig,trim(resample_strategy),rough_fac,neff_thresh, &
                                   tmax,dr,spd, &
                                   rmse(rng_err,0.0_dp),rmse(ang_err,0.0_dp),rmse(rngrt_err,0.0_dp), &
                                   rmse(x_err,0.0_dp),rmse(y_err,0.0_dp), &
@@ -518,15 +553,13 @@ implicit none
         else
             error stop 'nan should not happen'
         end if
-        fmtstr = '(2(a,i0),a,a11,a,e13.6,2(a,f0.2),a,f0.1,a,e13.6)'
+        fmtstr = '(2(a,i0),a,a11,2(a,f0.2),a,f0.1,a,e13.6)'
         write(*,fmtstr) 'particles: ',num_particles,', init_meas_sig: ',init_meas_sig, &
                         ', ',trim(resample_strategy), &
-                        ', jerk_sig: ',jerk_sig, &
                         ', rough_fac: ',rough_fac,', neff_thresh: ',neff_thresh, &
                         ', tmax: ',tmax, &
                         ', rmse pos_err: ',rmse(pos_err,0.0_dp)
-    end do
-    end do
+    end do loop_spd
     end do
     end do
     end do
