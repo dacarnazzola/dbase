@@ -25,6 +25,11 @@ private
         module procedure :: avg_dp
     end interface avg
 
+    interface geomean
+        module procedure :: geomean_sp
+        module procedure :: geomean_dp
+    end interface geomean
+
     interface std
         module procedure :: std_sp
         module procedure :: std_dp
@@ -63,7 +68,7 @@ private
         module procedure :: cov_dp
     end interface cov
 
-    public :: dsum, avg, std, normal_pdf, normalize, cumsum, prod, mv_normal_pdf, cov
+    public :: dsum, avg, geomean, std, normal_pdf, normalize, cumsum, prod, mv_normal_pdf, cov
 
 contains
 
@@ -244,6 +249,30 @@ contains
                                    'module STATISTICS :: avg function invalid for array with length < 1')
         val = dsum(x)/real(n, kind=dp)
     end function avg_dp
+
+    pure function geomean_sp(x) result(val)
+        real(kind=sp), intent(in) :: x(:)
+        real(kind=sp) :: val
+        integer(kind=i64) :: n
+        call debug_error_condition(logical(any(x <= 0.0_sp), kind=c_bool), &
+                                   'module STATISTICS :: geomean function invalid for values <= 0.0')
+        n = size(x, kind=i64)
+        call debug_error_condition(logical(n < 1_i64, kind=c_bool), &
+                                   'module STATISTICS :: geomean function invalid for array with length < 1')
+        val = prod(x)**(1.0_sp/real(n, kind=sp))
+    end function geomean_sp
+
+    pure function geomean_dp(x) result(val)
+        real(kind=dp), intent(in) :: x(:)
+        real(kind=dp) :: val
+        integer(kind=i64) :: n
+        call debug_error_condition(logical(any(x <= 0.0_dp), kind=c_bool), &
+                                   'module STATISTICS :: geomean function invalid for values <= 0.0')
+        n = size(x, kind=i64)
+        call debug_error_condition(logical(n < 1_i64, kind=c_bool), &
+                                   'module STATISTICS :: geomean function invalid for array with length < 1')
+        val = prod(x)**(1.0_dp/real(n, kind=dp))
+    end function geomean_dp
 
     pure function std_sp(x) result(val)
         real(kind=sp), intent(in) :: x(:)
@@ -481,8 +510,8 @@ contains
             xcov(i:ndims,i) = xcov(i:ndims,i)/nsamples_1
             xcov(i,i) = xcov(i,i) + eps_sp
         end do
-        do i=1_i64,ndims
-            x_row(1_i64:i-1_i64) = xcov(1_i64:i-1_i64,i)
+        do i=2_i64,ndims
+            x_row(1_i64:i-1_i64) = xcov(i,1_i64:i-1_i64)
             do j=1_i64,i-1_i64
                 xcov(j,i) = x_row(j)
             end do
@@ -511,12 +540,21 @@ contains
             xcov(i:ndims,i) = xcov(i:ndims,i)/nsamples_1
             xcov(i,i) = xcov(i,i) + eps_dp
         end do
-        do i=1_i64,ndims
-            x_row(1_i64:i-1_i64) = xcov(1_i64:i-1_i64,i)
+!        write(*,*) 'before making symetric...'
+!        do i=1_i64,ndims
+!            write(*,'(a,i0,a,*(e13.6," "))') 'row ',i,': ',xcov(i,:)
+!        end do
+        do i=2_i64,ndims
+            x_row(1_i64:i-1_i64) = xcov(i,1_i64:i-1_i64)
             do j=1_i64,i-1_i64
                 xcov(j,i) = x_row(j)
             end do
         end do
+!        write(*,*) 'cov done...'
+!        do i=1_i64,ndims
+!            write(*,'(a,i0,a,*(e13.6," "))') 'row ',i,': ',xcov(i,:)
+!        end do
+!        error stop 'check src/modules/statistics.f90 :: cov_dp'
     end subroutine cov_dp
 
 end module statistics
