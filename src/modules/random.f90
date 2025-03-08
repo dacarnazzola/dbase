@@ -103,7 +103,7 @@ contains
         nvars = size(vout, dim=2, kind=i64)
         call chol(cov, cov_L)
         call random_normal(z, 0.0_sp, 1.0_sp)
-        do concurrent (i=1_i64:nvars)
+        do i=1_i64,nvars
             vout(:,i) = mu + matmul(cov_L, z((i-1_i64)*ndims+1_i64:i*ndims))
         end do
     end subroutine random_multivariable_normal_sp
@@ -123,12 +123,8 @@ contains
                                    'module RANDOM :: subroutine random_normal requires square covariance input (n x n)')
         nvars = size(vout, dim=2, kind=i64)
         call chol(cov, cov_L)
-        write(*,'(a)') 'cholesky decomposition of cov'
-        do i=1_i64,size(cov_L,dim=1)
-            write(*,'(a,i0,a,*(e13.6," "))') 'row ',i,': ',cov_L(i,:)
-        end do
         call random_normal(z, 0.0_dp, 1.0_dp)
-        do concurrent (i=1_i64:nvars)
+        do i=1_i64,nvars
             vout(:,i) = mu + matmul(cov_L, z((i-1_i64)*ndims+1_i64:i*ndims))
         end do
     end subroutine random_multivariable_normal_dp

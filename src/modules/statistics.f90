@@ -540,21 +540,12 @@ contains
             xcov(i:ndims,i) = xcov(i:ndims,i)/nsamples_1
             xcov(i,i) = xcov(i,i) + eps_dp
         end do
-!        write(*,*) 'before making symetric...'
-!        do i=1_i64,ndims
-!            write(*,'(a,i0,a,*(e13.6," "))') 'row ',i,': ',xcov(i,:)
-!        end do
         do i=2_i64,ndims
             x_row(1_i64:i-1_i64) = xcov(i,1_i64:i-1_i64)
             do j=1_i64,i-1_i64
                 xcov(j,i) = x_row(j)
             end do
         end do
-!        write(*,*) 'cov done...'
-!        do i=1_i64,ndims
-!            write(*,'(a,i0,a,*(e13.6," "))') 'row ',i,': ',xcov(i,:)
-!        end do
-!        error stop 'check src/modules/statistics.f90 :: cov_dp'
     end subroutine cov_dp
 
 end module statistics
