@@ -33,6 +33,7 @@ private
     interface std
         module procedure :: std_sp
         module procedure :: std_dp
+        module procedure :: std_weighted_sp
         module procedure :: std_weighted_dp
     end interface std
 
@@ -295,6 +296,26 @@ contains
         val = sqrt(dsum((x - avg(x))**2)/real(n - 1_i64, kind=dp))
     end function std_dp
 
+    pure function std_weighted_sp(x, w) result(val)
+        real(kind=sp), intent(in) :: x(:), w(:)
+        real(kind=sp) :: val
+        integer(kind=i64) :: n, m
+        real(kind=sp) :: w_norm(size(w, kind=i64)), wx_avg, wx_cen2(size(x, kind=i64)), numer, mfrac
+        n = size(x, kind=i64)
+        call debug_error_condition(logical(n < 2_i64, kind=c_bool), &
+                                   'module STATISTICS :: std function invalid for array with length < 2')
+        call debug_error_condition(logical(size(w, kind=i64) /= n, kind=c_bool), &
+                                   'module STATISTICS :: weighted std function must have x and w same length')
+        call normalize(w, w_norm)
+        wx_avg = dsum(w_norm*x)
+        wx_cen2 = x - wx_avg !! center x
+        wx_cen2 = wx_cen2**2 !! square (x - xbar) term
+        numer = dsum(w_norm*wx_cen2) !! numerator under square root
+        m = count(.not.nearly(abs(w_norm), 0.0_sp), kind=i64) !! m is quantity of non-zero weights
+        mfrac = real(m - 1_i64, kind=sp)/real(m, kind=sp) !! (m-1)/m
+        val = sqrt(numer/mfrac)
+    end function std_weighted_sp
+
     pure function std_weighted_dp(x, w) result(val)
         real(kind=dp), intent(in) :: x(:), w(:)
         real(kind=dp) :: val
@@ -306,7 +327,7 @@ contains
         call debug_error_condition(logical(size(w, kind=i64) /= n, kind=c_bool), &
                                    'module STATISTICS :: weighted std function must have x and w same length')
         call normalize(w, w_norm)
-        wx_avg = avg(w_norm*x)
+        wx_avg = dsum(w_norm*x)
         wx_cen2 = x - wx_avg !! center x
         wx_cen2 = wx_cen2**2 !! square (x - xbar) term
         numer = dsum(w_norm*wx_cen2) !! numerator under square root
