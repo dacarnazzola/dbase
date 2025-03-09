@@ -33,6 +33,7 @@ private
     interface std
         module procedure :: std_sp
         module procedure :: std_dp
+        module procedure :: std_weighted_dp
     end interface std
 
     interface normal_pdf
@@ -293,6 +294,26 @@ contains
                                    'module STATISTICS :: std function invalid for array with length < 2')
         val = sqrt(dsum((x - avg(x))**2)/real(n - 1_i64, kind=dp))
     end function std_dp
+
+    pure function std_weighted_dp(x, w) result(val)
+        real(kind=dp), intent(in) :: x(:), w(:)
+        real(kind=dp) :: val
+        integer(kind=i64) :: n, m
+        real(kind=dp) :: w_norm(size(w, kind=i64)), wx_avg, wx_cen2(size(x, kind=i64)), numer, mfrac
+        n = size(x, kind=i64)
+        call debug_error_condition(logical(n < 2_i64, kind=c_bool), &
+                                   'module STATISTICS :: std function invalid for array with length < 2')
+        call debug_error_condition(logical(size(w, kind=i64) /= n, kind=c_bool), &
+                                   'module STATISTICS :: weighted std function must have x and w same length')
+        call normalize(w, w_norm)
+        wx_avg = avg(w_norm*x)
+        wx_cen2 = x - wx_avg !! center x
+        wx_cen2 = wx_cen2**2 !! square (x - xbar) term
+        numer = dsum(w_norm*wx_cen2) !! numerator under square root
+        m = count(.not.nearly(abs(w_norm), 0.0_dp), kind=i64) !! m is quantity of non-zero weights
+        mfrac = real(m - 1_i64, kind=dp)/real(m, kind=dp) !! (m-1)/m
+        val = sqrt(numer/mfrac)
+    end function std_weighted_dp
 
     pure elemental function normal_pdf_1d_sp(x, mu, sig) result(val)
         real(kind=sp), intent(in) :: x, mu, sig
