@@ -9,8 +9,11 @@ use, non_intrinsic :: sorting, only: sort
 implicit none
 private
 
-    logical, parameter :: debug = .true., debug_run = .false., debug_init = .false.
-    logical :: ballistic_particles = .false.
+    logical, parameter :: debug      = .false.
+    logical, parameter :: debug_run  = .false.
+    logical, parameter :: debug_init = .false.
+    logical :: ballistic_particles   = .false.
+    integer :: vt_initialization_mode = -1
     
     real(dp), parameter :: global_minimum_range = 1.0_dp
     real(dp), parameter :: nmi2ft = 1852.0_dp*100.0_dp/2.54_dp/12.0_dp
@@ -34,7 +37,7 @@ private
               fly_constant_acceleration, propagate_particles, apply_constraints, resample_jerk, dump_particles, &
               rmse, neff, &
               avg, std, nearly, geomean, sort, &
-              ballistic_particles
+              ballistic_particles, vt_initialization_mode
 
 contains
 
@@ -135,14 +138,38 @@ contains
         real(dp) :: polar_measurements(3,n), tgt_spd_scale(n), ax(n), ay(n)
         integer :: i
         call resample_measurements(meas, meas_sig, tgt_max_rng, tgt_max_spd, n, polar_measurements)
-        call random_log_uniform(tgt_spd_scale, 0.25_dp, 1.0_dp) !! p50 value of 0.5
-!        call random_normal(tgt_spd_scale, 0.0_dp, 1.0_dp)
-!        do i=1,n
-!            do while ((tgt_spd_scale(i) > 1.0_dp) .or. (tgt_spd_scale(i) < -1.0_dp))
-!                call random_normal(tgt_spd_scale(i:i), 0.0_dp, 1.0_dp) 
-!            end do
-!        end do
-!        tgt_spd_scale = abs(tgt_spd_scale)
+        select case (vt_initialization_mode)
+            case (1)
+                call random_uniform(tgt_spd_scale, 0.0_dp, 1.0_dp)
+            case (2)
+                call random_log_uniform(tgt_spd_scale, 0.25_dp, 1.0_dp) !! p50 value of 0.5
+            case (3)
+                call random_normal(tgt_spd_scale, 0.0_dp, 1.0_dp)
+                do i=1,n
+                    do while ((tgt_spd_scale(i) > 1.0_dp) .or. (tgt_spd_scale(i) < -1.0_dp))
+                        call random_normal(tgt_spd_scale(i:i), 0.0_dp, 1.0_dp)
+                    end do
+                end do
+                tgt_spd_scale = abs(tgt_spd_scale)
+            case (4)
+                call random_normal(tgt_spd_scale, 0.0_dp, 1.0_dp/2.0_dp)
+                do i=1,n
+                    do while ((tgt_spd_scale(i) > 1.0_dp) .or. (tgt_spd_scale(i) < -1.0_dp))
+                        call random_normal(tgt_spd_scale(i:i), 0.0_dp, 1.0_dp/2.0_dp) 
+                    end do
+                end do
+                tgt_spd_scale = abs(tgt_spd_scale)
+            case (5)
+                call random_normal(tgt_spd_scale, 0.0_dp, 1.0_dp/3.0_dp)
+                do i=1,n
+                    do while ((tgt_spd_scale(i) > 1.0_dp) .or. (tgt_spd_scale(i) < -1.0_dp))
+                        call random_normal(tgt_spd_scale(i:i), 0.0_dp, 1.0_dp/3.0_dp)
+                    end do
+                end do
+                tgt_spd_scale = abs(tgt_spd_scale)
+            case default
+                error stop 'unimplemented Vtangential initialization mode'
+        end select
         call resample_jerk(jerk_sig)
         call random_normal(ax, 0.0_dp, 1.0_dp*g)
         if (ballistic_particles) then
@@ -183,7 +210,7 @@ contains
         tgt_cart(3:4) = tgt_cart(3:4)/tgt_final_spd_scale
     end
 
-    pure subroutine convert_particles_cart2pol(obs_cart, n, cartesian_particles, polar_particles)
+  pure subroutine convert_particles_cart2pol(obs_cart, n, cartesian_particles, polar_particles)
         real(dp), intent(in) :: obs_cart(:) 
         integer, intent(in) :: n
         real(dp), intent(in) :: cartesian_particles(size(obs_cart),n)
@@ -194,7 +221,7 @@ contains
         end do
     end
 
-    pure subroutine generate_state_estimate(state_estimate, n, particles, weights)
+  pure subroutine generate_state_estimate(state_estimate, n, particles, weights)
         real(dp), intent(out) :: state_estimate(:)
         integer, intent(in) :: n
         real(dp), intent(in) :: particles(size(state_estimate),n), weights(n)
@@ -204,7 +231,7 @@ contains
         end do
     end
 
-    pure subroutine calculate_weights(tgt_pol, meas_sig, n, polar_particles, weights)
+  pure subroutine calculate_weights(tgt_pol, meas_sig, n, polar_particles, weights)
         real(dp), intent(in) :: tgt_pol(3), meas_sig(3)
         integer, intent(in) :: n
         real(dp), intent(in) :: polar_particles(3,n)
@@ -360,7 +387,7 @@ contains
         end do
     end
 
-    pure subroutine calculate_kernel_bandwidth(n, particles, weights, h)
+  pure subroutine calculate_kernel_bandwidth(n, particles, weights, h)
         integer, intent(in) :: n
         real(dp), intent(in) :: particles(:,:), weights(:)
         real(dp), intent(out) :: h(size(particles,dim=1))
@@ -433,7 +460,7 @@ contains
         end do
     end
 
-    pure subroutine apply_constraints(obs_cart, max_rng, max_spd, max_acc, n, cartesian_particles, polar_particles)
+  pure subroutine apply_constraints(obs_cart, max_rng, max_spd, max_acc, n, cartesian_particles, polar_particles)
         real(dp), intent(in) :: obs_cart(:), max_rng, max_spd, max_acc
         integer, intent(in) :: n
         real(dp), intent(inout) :: cartesian_particles(:,:)
@@ -505,7 +532,7 @@ program ex_particle_filter
 use, non_intrinsic :: pf
 implicit none
 
-    integer, parameter :: max_trials = 1
+    integer, parameter :: max_trials = 128
     real(dp), parameter :: max_rng   = 500.0_dp*nmi2ft, &
                            max_spd   = 10000.0_dp, &
                            max_acc   = 9.0_dp*g, &
@@ -517,7 +544,7 @@ implicit none
 
     procedure(resample_cartesian_particles), pointer :: resample_subroutine
     integer :: dr, tmax_int, spd, rough_fac_int, neff_pass_int, num_particles, trial, num_particles_ii, init_meas_sig, &
-               resampling_method, jerk_sig_lo_int, jerk_sig_hi_int, roughening_method, fid
+               resampling_method, jerk_sig_lo_int, jerk_sig_hi_int, roughening_method, fid, init_vt_method
     real(dp) :: obs_cart(6), tgt_cart(6), tgt_pol(3), t, tmax, rough_fac, neff_thresh, neff_pass, neff0, &
                 meas(3), est_cart(6), est_pol(3), meas_sig_fac, jerk_sig_lo, jerk_sig_hi, h(size(est_cart)), &
                 x_err(max_trials), y_err(max_trials), pos_err(max_trials), &
@@ -528,14 +555,14 @@ implicit none
     character(len=1024) :: fmtstr, resample_strategy, run_description, num_particles_str, init_meas_sig_str, &
                            neff_pass_int_str, rough_fac_int_str, resampling_method_str, tmax_int_str, dr_str, spd_str, &
                            max_trials_str, trial_str, filename, jerk_sig_lo_int_str, jerk_sig_hi_int_str, roughening_method_str, &
-                           roughen_strategy
+                           roughen_strategy, init_vt_mode, init_vt_method_str
 
     open(newunit=fid, file='/valinor/last-run.csv', action='write')
-    write(fid,'(a)') 'max_trials,num_particles,init_meas_sig,resampling_method,roughening_method,rough_fac,neff_thresh,'// &
+    write(fid,'(a)') 'max_trials,num_particles,init_meas_sig,vt_mode,resampling_method,roughening_method,rough_fac,neff_thresh,'// &
                      'jerk_sig_lo,jerk_sig_hi,tmax_sec,downrange_nmi,spd_mach,rmse_rng,rmse_ang,rmse_rngrt,rmse_x,rmse_y,'// &
                      'rmse_vx,rmse_vy,rmse_ax,rmse_ay,rmse_pos,rmse_vel,rmse_acc,rmse_composite,max_pos_err'
     write(max_trials_str,'(a,i0)') 'max_trials: ',max_trials
-    do num_particles_ii=11,31,10
+    do num_particles_ii=11,11,10
         num_particles = 10**(num_particles_ii/10)*1000*mod(num_particles_ii,10)
         if (num_particles == 0) cycle
         if (allocated(cartesian_particles)) deallocate(cartesian_particles)
@@ -547,14 +574,34 @@ implicit none
                  polar_particles(3,num_particles), &
                  jerk_sig(num_particles))
         write(num_particles_str,'(a,i0)') ' | num_particles: ',num_particles
-    do init_meas_sig=3,3 !! multiply meas_sig by init_meas_sig for particle initialization
-        meas_sig_fac = real(init_meas_sig, kind=dp)
-        write(init_meas_sig_str,'(a,f0.1)') ' | init_meas_sig: ',meas_sig_fac
-    do neff_pass_int=10,10 !! respample when Neff is 5-100% of num_particles                                        
+    do neff_pass_int=5,50,5 !! respample when Neff is 5-100% of num_particles                                        
         neff_thresh = real(neff_pass_int, kind=dp)/100.0_dp                                                           
         neff_pass = ceiling(neff_thresh*num_particles)
-        neff0 = num_particles                                                                                         
         write(neff_pass_int_str,'(a,f0.2)') ' | neff_thresh: ',neff_thresh
+    do rough_fac_int=10,100,10 !! scaling Neff**(-1/(d+4))
+        rough_fac = real(rough_fac_int,dp)/100.0_dp
+        write(rough_fac_int_str,'(a,f0.2)') ' | rough_fac: ',rough_fac
+    do init_vt_method=1,5 !! tangential velocity component initialization
+        select case (init_vt_method)
+            case (1) !! Vtotal uniform from Vradial to Vmax
+                vt_initialization_mode = 1
+                init_vt_mode = 'uniform'
+            case (2) !! Vtotal log-uniform from Vradial to Vmax
+                vt_initialization_mode = 2
+                init_vt_mode = 'log_uniform'
+            case (3) !! Vtotal normal about Vradial with sigma (Vmax-Vradial)/1
+                vt_initialization_mode = 3
+                init_vt_mode = 'normal_sig_1'
+            case (4) !! Vtotal normal about Vradial with sigma (Vmax-Vradial)/2
+                vt_initialization_mode = 4
+                init_vt_mode = 'normal_sig_2'
+            case (5) !! Vtotal normal about Vradial with sigma (Vmax-Vradial)/3
+                vt_initialization_mode = 5
+                init_vt_mode = 'normal_sig_3'
+            case default
+                error stop 'not implemented'
+        end select
+        write(init_vt_method_str,'(a)') ' | vt_method: '//trim(init_vt_mode)
     do resampling_method=1,4 !! select case on method used
         select case (resampling_method)
             case (1)
@@ -573,7 +620,7 @@ implicit none
                 error stop 'not implemented yet'
         end select
         write(resampling_method_str,'(a)') ' | resample_strategy: '//trim(resample_strategy)
-    do roughening_method=1,4 !! select case on method used
+    do roughening_method=1,8 !! select case on method used
         select case (roughening_method)
             case (1)
                 roughen_strategy = 'cov_reg'
@@ -583,22 +630,29 @@ implicit none
                 roughen_strategy = 'kern_smooth'
             case (4)
                 roughen_strategy = 'neff_kern_smooth'
+            case (5)
+                roughen_strategy = 'jitter_vxy'
+            case (6)
+                roughen_strategy = 'neff_jitter_vxy'
+            case (7)
+                roughen_strategy = 'jitter_axy'
+            case (8)
+                roughen_strategy = 'neff_jitter_axy'
             case default
                 error stop 'not implemented yet, want to add vxy jitter and axy jitter options'
         end select
         write(roughening_method_str,'(a)') ' | roughen_strategy: '//trim(roughen_strategy)
-    do rough_fac_int=5,100,5 !! scaling Neff**(-1/(d+4))
-        rough_fac = real(rough_fac_int,dp)/100.0_dp
-        write(rough_fac_int_str,'(a,f0.2)') ' | rough_fac: ',rough_fac
-    do jerk_sig_lo_int=-325,-325 ! -900,0,100
+    do init_meas_sig=1,6 !! multiply meas_sig by init_meas_sig for particle initialization
+        meas_sig_fac = real(init_meas_sig, kind=dp)
+        write(init_meas_sig_str,'(a,f0.1)') ' | init_meas_sig: ',meas_sig_fac
+    do jerk_sig_lo_int=-325,-325 !! -325,-325 ! no args defaults
         jerk_sig_lo = 10.0_dp**(real(jerk_sig_lo_int,dp)/100.0_dp)
         write(jerk_sig_lo_int_str,'(a,e13.6)') ' | jerk_sig_lo: ',jerk_sig_lo
-    do jerk_sig_hi_int=-75,-75 ! jerk_sig_lo_int+100,200,100
+    do jerk_sig_hi_int=-75,-75 !! -75,-75 ! no args defaults
         jerk_sig_hi = 10.0_dp**(real(jerk_sig_hi_int,dp)/100.0_dp)
         write(jerk_sig_hi_int_str,'(a,e13.6)') ' | jerk_sig_hi: ',jerk_sig_hi
-    do tmax_int=200,200 !! performance should increase with tmax until target passes max_spd
+    do tmax_int=201,201 !! performance should increase with tmax until target passes max_spd
         tmax = real(tmax_int, kind=dp)
-        t = 0.0_dp
         write(tmax_int_str,'(a,f0.1)') ' | tmax: ',tmax
         if (mod(tmax_int, 2) == 1) then
             ballistic_particles = .true. !! odd tmax assume ballistic ay
@@ -609,8 +663,8 @@ implicit none
         write(dr_str,'(a,i0)') ' | dr: ',dr
     loop_spd: do spd=3,3 !! ~Mach
         write(spd_str,'(a,i0)') ' | spd: ',spd
-    !$omp parallel do default(firstprivate) shared(x_err, y_err, vx_err, vy_err, ax_err, ay_err, pos_err, vel_err, acc_err, &
-    !$omp&                                         rng_err, ang_err, rngrt_err)
+    !$omp parallel do default(firstprivate) private(neff0, t) shared(x_err, y_err, vx_err, vy_err, ax_err, ay_err, pos_err, &
+    !$omp&                                                           vel_err, acc_err, rng_err, ang_err, rngrt_err)
     loop_trials: do trial=1,max_trials
         !! reset starting positions for each run
         obs_cart = 0.0_dp
@@ -631,7 +685,8 @@ implicit none
             cycle
         end if
         write(trial_str,'(a,i0)') ' | trial: ',trial
-        run_description = trim(max_trials_str)//trim(trial_str)//trim(num_particles_str)//trim(init_meas_sig_str)// &
+        run_description = trim(max_trials_str)//trim(trial_str)//trim(num_particles_str)//trim(init_vt_method_str)// &
+                          trim(init_meas_sig_str)// &
                           trim(neff_pass_int_str)//trim(jerk_sig_lo_int_str)//trim(jerk_sig_hi_int_str)// &
                           trim(resampling_method_str)//trim(roughening_method_str)//trim(rough_fac_int_str)//trim(tmax_int_str)// &
                           trim(dr_str)//trim(spd_str)
@@ -699,10 +754,23 @@ implicit none
                     case (4) !! pre-resample bandwidth kernel smoothing with neff scaling
                         call apply_kernel_smoothing(h, rough_fac*neff0**(-1.0_dp/(size(cartesian_particles,dim=1)+4)), &
                                                     num_particles, cartesian_particles)
+                    case (5) !! pre-resample bandwidth kernel smoothing only vx and vy
+                        h(1) = 0.0_dp; h(2) = 0.0_dp; h(5) = 0.0_dp; h(6) = 0.0_dp;
+                        call apply_kernel_smoothing(h, rough_fac, num_particles, cartesian_particles)
+                    case (6) !! pre-resample bandwidth kernel smoothing only vx and vy with neff scaling
+                        h(1) = 0.0_dp; h(2) = 0.0_dp; h(5) = 0.0_dp; h(6) = 0.0_dp;
+                        call apply_kernel_smoothing(h, rough_fac*neff0**(-1.0_dp/(size(cartesian_particles,dim=1)+4)), &
+                                                    num_particles, cartesian_particles)
+                    case (7) !! pre-resample bandwidth kernel smoothing only ax and ay
+                        h(1) = 0.0_dp; h(2) = 0.0_dp; h(3) = 0.0_dp; h(4) = 0.0_dp;
+                        call apply_kernel_smoothing(h, rough_fac, num_particles, cartesian_particles)
+                    case (8) !! pre-resample bandwidth kernel smoothing only ax and ay with neff scaling
+                        h(1) = 0.0_dp; h(2) = 0.0_dp; h(3) = 0.0_dp; h(4) = 0.0_dp;
+                        call apply_kernel_smoothing(h, rough_fac*neff0**(-1.0_dp/(size(cartesian_particles,dim=1)+4)), &
+                                                    num_particles, cartesian_particles)
                     case default
                         error stop 'none implemented'
                 end select
-!                if (neff0 < 0.5_dp*neff_pass) call resample_jerk(jerk_sig, jerk_sig_lo, jerk_sig_hi)
                 call resample_jerk(jerk_sig, jerk_sig_lo, jerk_sig_hi)
                 if (debug) then
                     call generate_state_estimate(est_cart, num_particles, cartesian_particles, weights)
@@ -738,14 +806,13 @@ implicit none
     !$omp end parallel do
         if (debug_init) cycle
         !! trials done
-        fmtstr = '(3(i0,","),2(a,","),2(f0.4,","),2(e13.6,","),f0.1,",",2(i0,","),13(e13.6,","),e13.6)'
+        fmtstr = '(3(i0,","),3(a,","),2(f0.4,","),2(e13.6,","),f0.1,",",2(i0,","),13(e13.6,","),e13.6)'
         if (all(nearly(pos_err, pos_err))) then
-            write(fid,fmt=trim(fmtstr)) max_trials,num_particles,init_meas_sig,trim(resample_strategy),trim(roughen_strategy), &
-                                        rough_fac, &
-                                        neff_thresh,jerk_sig_lo,jerk_sig_hi,tmax,dr,spd,rmse(rng_err,0.0_dp),rmse(ang_err,0.0_dp), &
-                                        rmse(rngrt_err,0.0_dp),rmse(x_err,0.0_dp),rmse(y_err,0.0_dp),rmse(vx_err,0.0_dp), &
-                                        rmse(vy_err,0.0_dp),rmse(ax_err,0.0_dp),rmse(ay_err,0.0_dp),rmse(pos_err,0.0_dp), &
-                                        rmse(vel_err,0.0_dp),rmse(acc_err,0.0_dp), &
+            write(fid,fmt=trim(fmtstr)) max_trials,num_particles,init_meas_sig,trim(init_vt_mode),trim(resample_strategy), &
+                                        trim(roughen_strategy),rough_fac,neff_thresh,jerk_sig_lo,jerk_sig_hi,tmax,dr,spd, &
+                                        rmse(rng_err,0.0_dp),rmse(ang_err,0.0_dp),rmse(rngrt_err,0.0_dp),rmse(x_err,0.0_dp), &
+                                        rmse(y_err,0.0_dp),rmse(vx_err,0.0_dp),rmse(vy_err,0.0_dp),rmse(ax_err,0.0_dp), &
+                                        rmse(ay_err,0.0_dp),rmse(pos_err,0.0_dp),rmse(vel_err,0.0_dp),rmse(acc_err,0.0_dp), &
                                         geomean([rmse(pos_err,0.0_dp),rmse(vel_err,0.0_dp),rmse(acc_err,0.0_dp)]),maxval(pos_err)
             flush(fid)
         else
@@ -753,8 +820,8 @@ implicit none
         end if
         fmtstr = '(a,e13.6)'
         run_description = trim(max_trials_str)//trim(num_particles_str)//trim(init_meas_sig_str)//trim(neff_pass_int_str)// &
-                          trim(jerk_sig_lo_int_str)//trim(jerk_sig_hi_int_str)//trim(resampling_method_str)// &
-                          trim(roughening_method_str)//trim(rough_fac_int_str)
+                          trim(rough_fac_int_str)//trim(init_vt_method_str)//trim(resampling_method_str)// &
+                          trim(roughening_method_str)
         write(*,fmtstr) trim(run_description)//' | RMSE position: ',rmse(pos_err,0.0_dp)
         if (debug) then
         call sort(pos_err)
@@ -764,6 +831,7 @@ implicit none
             end do
         end if
     end do loop_spd
+    end do
     end do
     end do
     end do
