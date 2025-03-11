@@ -27,12 +27,20 @@ private
             integer, intent(in) :: n
             real(dp), intent(inout) :: cartesian_particles(:,:), weights(:), jerk_sig(:)
         end
+        pure subroutine calculate_weights(tgt_pol, meas_sig, n, polar_particles, weights)
+        import dp
+        implicit none
+            real(dp), intent(in) :: tgt_pol(:), meas_sig(:)
+            integer, intent(in) :: n
+            real(dp), intent(in) :: polar_particles(:,:)
+            real(dp), intent(inout) :: weights(:)
+        end
     end interface
 
     public :: debug, debug_run, debug_init, dp, nmi2ft, ft2nmi, deg2rad_dp, rad2deg_dp, g, pi_dp, twopi_dp, &
               perfect_cart2pol, generate_measurements, initialize_particles, convert_particles_cart2pol, &
-              generate_state_estimate, calculate_weights, apply_roughening, &
-              calculate_kernel_bandwidth, apply_kernel_smoothing, &
+              generate_state_estimate, calculate_weights_gaussian, calculate_weights_student_t, apply_roughening, &
+              calculate_kernel_bandwidth, apply_kernel_smoothing, calculate_weights, &
               resample_cartesian_particles, resample_systematic, resample_multinomial, resample_residual, resample_stratified, &
               fly_constant_acceleration, propagate_particles, apply_constraints, resample_jerk, dump_particles, &
               rmse, neff, &
@@ -95,6 +103,7 @@ contains
         real(dp), intent(in) :: meas(3), meas_sig(3), no_meas_max_rng, no_meas_max_spd
         integer, intent(in) :: n
         real(dp), intent(out) :: polar_measurements(3,n)
+        integer :: i
         if (meas_sig(1) > 0) then
             call random_normal(polar_measurements(1,:), meas(1), meas_sig(1))
         else
@@ -104,6 +113,13 @@ contains
             call random_normal(polar_measurements(2,:), meas(2), meas_sig(2))
         else
             call random_uniform(polar_measurements(2,:), -pi_dp, pi_dp)
+        end if
+        if (ballistic_particles) then
+            do i=1,n
+                do while (polar_measurements(2,i) < 0.0_dp)
+                    call random_normal(polar_measurements(2:2,i), meas(2), meas_sig(2))
+                end do
+            end do
         end if
         if (meas_sig(3) > 0) then
             call random_normal(polar_measurements(3,:), meas(3), meas_sig(3))
@@ -171,10 +187,11 @@ contains
                 error stop 'unimplemented Vtangential initialization mode'
         end select
         call resample_jerk(jerk_sig)
-        call random_normal(ax, 0.0_dp, 1.0_dp*g)
         if (ballistic_particles) then
+            ax = 0.0_dp
             ay = -1.0_dp*g
         else
+            call random_normal(ax, 0.0_dp, 1.0_dp*g)
             call random_normal(ay, 0.0_dp, 1.0_dp*g)
         end if
         do concurrent (i=1:n)
@@ -183,6 +200,11 @@ contains
             if (size(obs_cart) == 6) then
                 cartesian_particles(5,i) = ax(i)
                 cartesian_particles(6,i) = ay(i)
+            end if
+            if (ballistic_particles) then
+                cartesian_particles(2,i) = max(0.0_dp, cartesian_particles(2,i))
+                cartesian_particles(3,i) = sign(cartesian_particles(3,i), -1.0_dp)
+                cartesian_particles(4,i) = abs(cartesian_particles(4,i))
             end if
         end do
         weights = 1.0_dp/real(n,dp)
@@ -210,7 +232,7 @@ contains
         tgt_cart(3:4) = tgt_cart(3:4)/tgt_final_spd_scale
     end
 
-  pure subroutine convert_particles_cart2pol(obs_cart, n, cartesian_particles, polar_particles)
+    pure subroutine convert_particles_cart2pol(obs_cart, n, cartesian_particles, polar_particles)
         real(dp), intent(in) :: obs_cart(:) 
         integer, intent(in) :: n
         real(dp), intent(in) :: cartesian_particles(size(obs_cart),n)
@@ -221,7 +243,7 @@ contains
         end do
     end
 
-  pure subroutine generate_state_estimate(state_estimate, n, particles, weights)
+    pure subroutine generate_state_estimate(state_estimate, n, particles, weights)
         real(dp), intent(out) :: state_estimate(:)
         integer, intent(in) :: n
         real(dp), intent(in) :: particles(size(state_estimate),n), weights(n)
@@ -231,13 +253,17 @@ contains
         end do
     end
 
-  pure subroutine calculate_weights(tgt_pol, meas_sig, n, polar_particles, weights)
-        real(dp), intent(in) :: tgt_pol(3), meas_sig(3)
+    pure subroutine calculate_weights_gaussian(tgt_pol, meas_sig, n, polar_particles, weights)
+        real(dp), intent(in) :: tgt_pol(:), meas_sig(:)
         integer, intent(in) :: n
-        real(dp), intent(in) :: polar_particles(3,n)
-        real(dp), intent(inout) :: weights(n)
+        real(dp), intent(in) :: polar_particles(:,:)
+        real(dp), intent(inout) :: weights(:)
         real(dp) :: err_fac(3), log_weights(n)
         integer :: i
+        call debug_error_condition(size(tgt_pol) /= 3, 'assumed polar: range, angle, range-rate')
+        call debug_error_condition(size(tgt_pol) /= size(meas_sig), 'tgt_pol and meas_sig size must match')
+        call debug_error_condition(size(tgt_pol) /= size(polar_particles,dim=1), 'tgt_pol and polar_particle ndims must match')
+        call debug_error_condition(size(weights) /= size(polar_particles,dim=2), 'size of weights and polar_particles nsamples')
         do concurrent (i=1:n)
             err_fac = 0.0_dp
             if (meas_sig(1) > 0) err_fac(1) = (polar_particles(1,i) - tgt_pol(1))**2/meas_sig(1)**2
@@ -248,6 +274,35 @@ contains
         log_weights = log_weights - maxval(log_weights) !! shift log domain weights by maxmimum log-weight
         weights = weights*exp(log_weights) ! + eps_dp !! convert back to non-log domain, consider adding eps_dp if this is still collapsing
         weights = weights/dsum(weights)
+    end
+
+    pure subroutine calculate_weights_student_t(tgt_pol, meas_sig, n, polar_particles, weights)
+        real(dp), intent(in) :: tgt_pol(:), meas_sig(:)
+        integer, intent(in) :: n
+        real(dp), intent(in) :: polar_particles(:,:)
+        real(dp), intent(inout) :: weights(:)
+        real(dp) :: err_fac(3), log_weights(n), v(n)
+        integer :: i
+        call debug_error_condition(size(tgt_pol) /= 3, 'assumed polar: range, angle, range-rate')
+        call debug_error_condition(size(tgt_pol) /= size(meas_sig), 'tgt_pol and meas_sig size must match')
+        call debug_error_condition(size(tgt_pol) /= size(polar_particles,dim=1), 'tgt_pol and polar_particle ndims must match')
+        call debug_error_condition(size(weights) /= size(polar_particles,dim=2), 'size of weights and polar_particles nsamples')
+        call debug_error_condition(minval(meas_sig) <= 0.0_dp, 'student_t weights not set up for missing dimensions')
+        do concurrent (i=1:n)
+            v(i) = 1.0_dp + (meas_sig(1)**2)/((polar_particles(1,i)**2)*(meas_sig(2)**2))
+            err_fac(1) = log(1.0_dp + (polar_particles(1,i) - tgt_pol(1))**2/(v(i)*meas_sig(1)**2))
+            err_fac(2) = log(1.0_dp + (mod(polar_particles(2,i) - tgt_pol(2) + pi_dp, twopi_dp) - pi_dp)**2/(v(i)*meas_sig(2)**2))
+            err_fac(3) = log(1.0_dp + (polar_particles(3,i) - tgt_pol(3))**2/(v(i)*meas_sig(3)**2))
+            log_weights(i) = (-(v(i) + 1.0_dp)/2.0_dp)*(err_fac(1) + err_fac(2) + err_fac(3)) !! log domain
+        end do
+        log_weights = log_weights - maxval(log_weights) !! shift log domain weights by maxmimum log-weight
+        weights = weights*exp(log_weights) ! + eps_dp !! convert back to non-log domain, consider adding eps_dp if this is still collapsing
+        weights = weights/dsum(weights)
+!        if (debug) then
+!            write(*,*) 'min v: ',minval(v),', max v: ',maxval(v)
+!            write(*,*) 'min log_weight: ',minval(log_weights),', max log_weight: ',maxval(log_weights)
+!            write(*,*) 'min weight: ',minval(weights),', max weight: ',maxval(weights)
+!        end if
     end
 
     impure subroutine resample_systematic(n, cartesian_particles, weights, jerk_sig)
@@ -387,7 +442,7 @@ contains
         end do
     end
 
-  pure subroutine calculate_kernel_bandwidth(n, particles, weights, h)
+    pure subroutine calculate_kernel_bandwidth(n, particles, weights, h)
         integer, intent(in) :: n
         real(dp), intent(in) :: particles(:,:), weights(:)
         real(dp), intent(out) :: h(size(particles,dim=1))
@@ -432,6 +487,11 @@ contains
         spd_scale = max(1.0_dp, sqrt(cart6_state(3)**2 + cart6_state(4)**2)/max_spd)
         cart6_state(3:4) = cart6_state(3:4)/spd_scale
         cart6_state(1:2) = cart6_state(1:2) + dt*cart6_state(3:4)
+        if (ballistic_particles .and. (cart6_state(2) <= 0.0_dp)) then
+            cart6_state(2) = 0.0_dp
+            cart6_state(4) = 0.0_dp
+            cart6_state(6) = 0.0_dp
+        end if
     end
 
     impure subroutine propagate_particles(dt, max_spd, max_acc, n, cartesian_particles, jerk_sig)
@@ -452,10 +512,15 @@ contains
             jy = jy*jerk_sig
         end if
         do concurrent (i=1:n)
-            cartesian_particles(5,i) = cartesian_particles(5,i) + dt*jx(i)
-            cartesian_particles(6,i) = cartesian_particles(6,i) + dt*jy(i)
-            acc_scale = max(1.0_dp, sqrt(cartesian_particles(5,i)**2 + cartesian_particles(6,i)**2)/max_acc)
-            cartesian_particles(5:6,i) = cartesian_particles(5:6,i)/acc_scale
+            if (ballistic_particles) then
+                cartesian_particles(5,i) = 0.0_dp
+                cartesian_particles(6,i) = -1.0_dp*g
+            else
+                cartesian_particles(5,i) = cartesian_particles(5,i) + dt*jx(i)
+                cartesian_particles(6,i) = cartesian_particles(6,i) + dt*jy(i)
+                acc_scale = max(1.0_dp, sqrt(cartesian_particles(5,i)**2 + cartesian_particles(6,i)**2)/max_acc)
+                cartesian_particles(5:6,i) = cartesian_particles(5:6,i)/acc_scale
+            end if
             call fly_constant_acceleration(cartesian_particles(:,i), dt, max_spd)
         end do
     end
@@ -543,8 +608,9 @@ implicit none
 !                           meas_sig(3) = [-1.0_dp, 0.1_dp*deg2rad_dp, -1.0_dp] ! bearing only
 
     procedure(resample_cartesian_particles), pointer :: resample_subroutine
+    procedure(calculate_weights), pointer :: calculate_weights_subroutine
     integer :: dr, tmax_int, spd, rough_fac_int, neff_pass_int, num_particles, trial, num_particles_ii, init_meas_sig, &
-               resampling_method, jerk_sig_lo_int, jerk_sig_hi_int, roughening_method, fid, init_vt_method
+               resampling_method, jerk_sig_lo_int, jerk_sig_hi_int, roughening_method, fid, init_vt_method, likelihood_method
     real(dp) :: obs_cart(6), tgt_cart(6), tgt_pol(3), t, tmax, rough_fac, neff_thresh, neff_pass, neff0, &
                 meas(3), est_cart(6), est_pol(3), meas_sig_fac, jerk_sig_lo, jerk_sig_hi, h(size(est_cart)), &
                 x_err(max_trials), y_err(max_trials), pos_err(max_trials), &
@@ -555,10 +621,11 @@ implicit none
     character(len=1024) :: fmtstr, resample_strategy, run_description, num_particles_str, init_meas_sig_str, &
                            neff_pass_int_str, rough_fac_int_str, resampling_method_str, tmax_int_str, dr_str, spd_str, &
                            max_trials_str, trial_str, filename, jerk_sig_lo_int_str, jerk_sig_hi_int_str, roughening_method_str, &
-                           roughen_strategy, init_vt_mode, init_vt_method_str
+                           roughen_strategy, init_vt_mode, init_vt_method_str, likelihood_method_str, likelihood_mode
 
     open(newunit=fid, file='/valinor/last-run.csv', action='write')
-    write(fid,'(a)') 'max_trials,num_particles,init_meas_sig,vt_mode,resampling_method,roughening_method,rough_fac,neff_thresh,'// &
+    write(fid,'(a)') 'max_trials,num_particles,init_meas_sig,vt_mode,likelihood_method,resampling_method,roughening_method,'// &
+                     'rough_fac,neff_thresh,'// &
                      'jerk_sig_lo,jerk_sig_hi,tmax_sec,downrange_nmi,spd_mach,rmse_rng,rmse_ang,rmse_rngrt,rmse_x,rmse_y,'// &
                      'rmse_vx,rmse_vy,rmse_ax,rmse_ay,rmse_pos,rmse_vel,rmse_acc,rmse_composite,max_pos_err'
     write(max_trials_str,'(a,i0)') 'max_trials: ',max_trials
@@ -574,11 +641,11 @@ implicit none
                  polar_particles(3,num_particles), &
                  jerk_sig(num_particles))
         write(num_particles_str,'(a,i0)') ' | num_particles: ',num_particles
-    do neff_pass_int=5,50,5 !! respample when Neff is 5-100% of num_particles                                        
+    do neff_pass_int=5,100,5 !! respample when Neff is 5-100% of num_particles                                        
         neff_thresh = real(neff_pass_int, kind=dp)/100.0_dp                                                           
         neff_pass = ceiling(neff_thresh*num_particles)
         write(neff_pass_int_str,'(a,f0.2)') ' | neff_thresh: ',neff_thresh
-    do rough_fac_int=10,100,10 !! scaling Neff**(-1/(d+4))
+    do rough_fac_int=5,100,5 !! scaling Neff**(-1/(d+4))
         rough_fac = real(rough_fac_int,dp)/100.0_dp
         write(rough_fac_int_str,'(a,f0.2)') ' | rough_fac: ',rough_fac
     do init_vt_method=1,5 !! tangential velocity component initialization
@@ -602,6 +669,18 @@ implicit none
                 error stop 'not implemented'
         end select
         write(init_vt_method_str,'(a)') ' | vt_method: '//trim(init_vt_mode)
+    do likelihood_method=1,2 !! gaussian or student_t
+        select case (likelihood_method)
+            case (1)
+                likelihood_mode = 'gaussian'
+                calculate_weights_subroutine => calculate_weights_gaussian
+            case (2)
+                likelihood_mode = 'student_t'
+                calculate_weights_subroutine => calculate_weights_student_t
+            case default
+                error stop 'not implemented'
+        end select
+        write(likelihood_method_str,'(a)') ' | likelihood_method: '//trim(likelihood_mode)
     do resampling_method=1,4 !! select case on method used
         select case (resampling_method)
             case (1)
@@ -642,9 +721,9 @@ implicit none
                 error stop 'not implemented yet, want to add vxy jitter and axy jitter options'
         end select
         write(roughening_method_str,'(a)') ' | roughen_strategy: '//trim(roughen_strategy)
-    do init_meas_sig=1,6 !! multiply meas_sig by init_meas_sig for particle initialization
-        meas_sig_fac = real(init_meas_sig, kind=dp)
-        write(init_meas_sig_str,'(a,f0.1)') ' | init_meas_sig: ',meas_sig_fac
+    do init_meas_sig=1,1,-1 !! multiply meas_sig by init_meas_sig for particle initialization
+        meas_sig_fac = 1.0_dp/real(init_meas_sig, kind=dp)
+        write(init_meas_sig_str,'(a,f0.4)') ' | init_meas_sig: ',meas_sig_fac
     do jerk_sig_lo_int=-325,-325 !! -325,-325 ! no args defaults
         jerk_sig_lo = 10.0_dp**(real(jerk_sig_lo_int,dp)/100.0_dp)
         write(jerk_sig_lo_int_str,'(a,e13.6)') ' | jerk_sig_lo: ',jerk_sig_lo
@@ -686,7 +765,7 @@ implicit none
         end if
         write(trial_str,'(a,i0)') ' | trial: ',trial
         run_description = trim(max_trials_str)//trim(trial_str)//trim(num_particles_str)//trim(init_vt_method_str)// &
-                          trim(init_meas_sig_str)// &
+                          trim(likelihood_method_str)//trim(init_meas_sig_str)// &
                           trim(neff_pass_int_str)//trim(jerk_sig_lo_int_str)//trim(jerk_sig_hi_int_str)// &
                           trim(resampling_method_str)//trim(roughening_method_str)//trim(rough_fac_int_str)//trim(tmax_int_str)// &
                           trim(dr_str)//trim(spd_str)
@@ -730,19 +809,19 @@ implicit none
                                                  ', vy: ',est_cart(4), ', ax: ',est_cart(5),', ay: ',est_cart(6)
             end if
             !! calculate weights, resample if Neff is below neff_pass (acceptable percentage of original num_particles)
-            call calculate_weights(meas, meas_sig, num_particles, polar_particles, weights)
+            call calculate_weights_subroutine(meas, meas_sig, num_particles, polar_particles, weights)
             neff0 = neff(weights)
             if (debug) then
                 write(*,'(a,f0.1)') '  Neff before resample: ',neff0
             end if
             if (neff0 < neff_pass) then
-                if (roughening_method > 2) call calculate_kernel_bandwidth(num_particles, cartesian_particles, weights, h)
                 call resample_subroutine(num_particles, cartesian_particles, weights, jerk_sig)
                 if (debug) then
                     call generate_state_estimate(est_cart, num_particles, cartesian_particles, weights)
                     write(*,'(6(a,f0.1))') 'POSTRESAMPLE x: ',est_cart(1),', y: ',est_cart(2),', vx: ',est_cart(3), &
                                                      ', vy: ',est_cart(4), ', ax: ',est_cart(5),', ay: ',est_cart(6)
                 end if
+                if (roughening_method > 2) call calculate_kernel_bandwidth(num_particles, cartesian_particles, weights, h)
                 select case (roughening_method)
                     case (1) !! covariance regularization
                         call apply_roughening(rough_fac, num_particles, cartesian_particles)
@@ -806,9 +885,10 @@ implicit none
     !$omp end parallel do
         if (debug_init) cycle
         !! trials done
-        fmtstr = '(3(i0,","),3(a,","),2(f0.4,","),2(e13.6,","),f0.1,",",2(i0,","),13(e13.6,","),e13.6)'
+        fmtstr = '(2(i0,","),e13.6,",",4(a,","),2(f0.4,","),2(e13.6,","),f0.1,",",2(i0,","),13(e13.6,","),e13.6)'
         if (all(nearly(pos_err, pos_err))) then
-            write(fid,fmt=trim(fmtstr)) max_trials,num_particles,init_meas_sig,trim(init_vt_mode),trim(resample_strategy), &
+            write(fid,fmt=trim(fmtstr)) max_trials,num_particles,meas_sig_fac,trim(init_vt_mode),trim(likelihood_mode), &
+                                        trim(resample_strategy), &
                                         trim(roughen_strategy),rough_fac,neff_thresh,jerk_sig_lo,jerk_sig_hi,tmax,dr,spd, &
                                         rmse(rng_err,0.0_dp),rmse(ang_err,0.0_dp),rmse(rngrt_err,0.0_dp),rmse(x_err,0.0_dp), &
                                         rmse(y_err,0.0_dp),rmse(vx_err,0.0_dp),rmse(vy_err,0.0_dp),rmse(ax_err,0.0_dp), &
@@ -820,7 +900,8 @@ implicit none
         end if
         fmtstr = '(a,e13.6)'
         run_description = trim(max_trials_str)//trim(num_particles_str)//trim(init_meas_sig_str)//trim(neff_pass_int_str)// &
-                          trim(rough_fac_int_str)//trim(init_vt_method_str)//trim(resampling_method_str)// &
+                          trim(rough_fac_int_str)//trim(init_vt_method_str)//trim(likelihood_method_str)// &
+                          trim(resampling_method_str)// &
                           trim(roughening_method_str)
         write(*,fmtstr) trim(run_description)//' | RMSE position: ',rmse(pos_err,0.0_dp)
         if (debug) then
@@ -831,6 +912,7 @@ implicit none
             end do
         end if
     end do loop_spd
+    end do
     end do
     end do
     end do
