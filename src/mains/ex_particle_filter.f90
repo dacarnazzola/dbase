@@ -14,6 +14,8 @@ private
     logical, parameter :: debug_init = .false.
     logical :: ballistic_particles   = .false.
     integer :: vt_initialization_mode = -1
+
+    integer, parameter :: max_iters = 100
     
     real(dp), parameter :: global_minimum_range = 1.0_dp
     real(dp), parameter :: nmi2ft = 1852.0_dp*100.0_dp/2.54_dp/12.0_dp
@@ -103,7 +105,7 @@ contains
         real(dp), intent(in) :: meas(3), meas_sig(3), no_meas_max_rng, no_meas_max_spd
         integer, intent(in) :: n
         real(dp), intent(out) :: polar_measurements(3,n)
-        integer :: i
+        integer :: i, iter
         if (meas_sig(1) > 0) then
             call random_normal(polar_measurements(1,:), meas(1), meas_sig(1))
         else
@@ -116,9 +118,12 @@ contains
         end if
         if (ballistic_particles) then
             do i=1,n
-                do while (polar_measurements(2,i) < 0.0_dp)
+                iter = 0
+                loop_reroll: do while (polar_measurements(2,i) < 0.0_dp)
                     call random_normal(polar_measurements(2:2,i), meas(2), meas_sig(2))
-                end do
+                    iter = iter + 1
+                    if (iter > max_iters) exit loop_reroll
+                end do loop_reroll
             end do
         end if
         if (meas_sig(3) > 0) then
@@ -152,7 +157,7 @@ contains
         integer, intent(in) :: n
         real(dp), intent(out) :: cartesian_particles(size(obs_cart),n), weights(n), jerk_sig(n)
         real(dp) :: polar_measurements(3,n), tgt_spd_scale(n), ax(n), ay(n)
-        integer :: i
+        integer :: i, iter
         call resample_measurements(meas, meas_sig, tgt_max_rng, tgt_max_spd, n, polar_measurements)
         select case (vt_initialization_mode)
             case (1)
@@ -162,25 +167,33 @@ contains
             case (3)
                 call random_normal(tgt_spd_scale, 0.0_dp, 1.0_dp)
                 do i=1,n
-                    do while ((tgt_spd_scale(i) > 1.0_dp) .or. (tgt_spd_scale(i) < -1.0_dp))
+                    iter = 0
+                    loop_reroll: do while ((tgt_spd_scale(i) > 1.0_dp) .or. (tgt_spd_scale(i) < -1.0_dp))
                         call random_normal(tgt_spd_scale(i:i), 0.0_dp, 1.0_dp)
-                    end do
+                        iter = iter + 1
+                        if (iter > max_iters) exit loop_reroll
+                    end do loop_reroll
                 end do
                 tgt_spd_scale = abs(tgt_spd_scale)
             case (4)
                 call random_normal(tgt_spd_scale, 0.0_dp, 1.0_dp/2.0_dp)
                 do i=1,n
-                    do while ((tgt_spd_scale(i) > 1.0_dp) .or. (tgt_spd_scale(i) < -1.0_dp))
+                    iter = 0
+                    loop_reroll2: do while ((tgt_spd_scale(i) > 1.0_dp) .or. (tgt_spd_scale(i) < -1.0_dp))
                         call random_normal(tgt_spd_scale(i:i), 0.0_dp, 1.0_dp/2.0_dp) 
-                    end do
+                        iter = iter + 1
+                        if (iter > max_iters) exit loop_reroll2
+                    end do loop_reroll2
                 end do
                 tgt_spd_scale = abs(tgt_spd_scale)
             case (5)
                 call random_normal(tgt_spd_scale, 0.0_dp, 1.0_dp/3.0_dp)
                 do i=1,n
-                    do while ((tgt_spd_scale(i) > 1.0_dp) .or. (tgt_spd_scale(i) < -1.0_dp))
+                    loop_reroll3: do while ((tgt_spd_scale(i) > 1.0_dp) .or. (tgt_spd_scale(i) < -1.0_dp))
                         call random_normal(tgt_spd_scale(i:i), 0.0_dp, 1.0_dp/3.0_dp)
-                    end do
+                        iter = iter + 1
+                        if (iter > max_iters) exit loop_reroll3
+                    end do loop_reroll3
                 end do
                 tgt_spd_scale = abs(tgt_spd_scale)
             case default
@@ -597,7 +610,7 @@ program ex_particle_filter
 use, non_intrinsic :: pf
 implicit none
 
-    integer, parameter :: max_trials = 128
+    integer, parameter :: max_trials = 256
     real(dp), parameter :: max_rng   = 500.0_dp*nmi2ft, &
                            max_spd   = 10000.0_dp, &
                            max_acc   = 9.0_dp*g, &
@@ -641,14 +654,14 @@ implicit none
                  polar_particles(3,num_particles), &
                  jerk_sig(num_particles))
         write(num_particles_str,'(a,i0)') ' | num_particles: ',num_particles
-    do neff_pass_int=5,100,5 !! respample when Neff is 5-100% of num_particles                                        
+    do neff_pass_int=15,25 !! respample when Neff is 5-100% of num_particles                                        
         neff_thresh = real(neff_pass_int, kind=dp)/100.0_dp                                                           
         neff_pass = ceiling(neff_thresh*num_particles)
         write(neff_pass_int_str,'(a,f0.2)') ' | neff_thresh: ',neff_thresh
-    do rough_fac_int=5,100,5 !! scaling Neff**(-1/(d+4))
+    do rough_fac_int=25,45 !! scaling Neff**(-1/(d+4))
         rough_fac = real(rough_fac_int,dp)/100.0_dp
         write(rough_fac_int_str,'(a,f0.2)') ' | rough_fac: ',rough_fac
-    do init_vt_method=1,5 !! tangential velocity component initialization
+    do init_vt_method=1,1 !! tangential velocity component initialization
         select case (init_vt_method)
             case (1) !! Vtotal uniform from Vradial to Vmax
                 vt_initialization_mode = 1
@@ -669,7 +682,7 @@ implicit none
                 error stop 'not implemented'
         end select
         write(init_vt_method_str,'(a)') ' | vt_method: '//trim(init_vt_mode)
-    do likelihood_method=1,2 !! gaussian or student_t
+    do likelihood_method=1,1 !! gaussian or student_t
         select case (likelihood_method)
             case (1)
                 likelihood_mode = 'gaussian'
@@ -681,7 +694,7 @@ implicit none
                 error stop 'not implemented'
         end select
         write(likelihood_method_str,'(a)') ' | likelihood_method: '//trim(likelihood_mode)
-    do resampling_method=1,4 !! select case on method used
+    do resampling_method=3,3 !! select case on method used
         select case (resampling_method)
             case (1)
                 resample_strategy = 'systematic'
@@ -699,7 +712,7 @@ implicit none
                 error stop 'not implemented yet'
         end select
         write(resampling_method_str,'(a)') ' | resample_strategy: '//trim(resample_strategy)
-    do roughening_method=1,8 !! select case on method used
+    do roughening_method=4,4 !! select case on method used
         select case (roughening_method)
             case (1)
                 roughen_strategy = 'cov_reg'
