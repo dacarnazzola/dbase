@@ -68,6 +68,8 @@ private
     interface cov
         module procedure :: cov_sp
         module procedure :: cov_dp
+        module procedure :: cov_weighted_sp
+        module procedure :: cov_weighted_dp
     end interface cov
 
     public :: dsum, avg, geomean, std, normal_pdf, normalize, cumsum, prod, mv_normal_pdf, cov
@@ -589,5 +591,71 @@ contains
             end do
         end do
     end subroutine cov_dp
+
+    pure subroutine cov_weighted_sp(x, w, xcov)
+        real(kind=sp), intent(in) :: x(:,:), w(:)
+        real(kind=sp), intent(out) :: xcov(size(x, dim=1, kind=i64),size(x, dim=1, kind=i64))
+        integer(kind=i64) :: ndims, i, j
+        real(kind=sp) :: x_row(size(x, dim=2, kind=i64)), u, x_centered(size(x, dim=2, kind=i64),size(x, dim=1, kind=i64)), &
+                         bessel, w_norm(size(x, dim=2, kind=i64))
+        call debug_error_condition(logical(size(x, dim=2, kind=i64) < 2_i64, kind=c_bool), &
+                                   'module STATISTICS :: cov subroutine invalid for array with dim=2 < 2')
+        call debug_error_condition(logical(size(x, dim=2, kind=i64) /= size(w), kind=c_bool), &
+                                   'module STATISTICS :: cov subroutine number of samples in x must match size of w')
+        call normalize(w, w_norm)
+        ndims = size(x, dim=1, kind=i64)
+        do i=1_i64,ndims
+            x_row = x(i,:)
+            u = vdot(w_norm, x_row)
+            x_centered(:,i) = x_row - u
+        end do
+        bessel = 1.0_sp/(1.0_sp - vdot(w_norm, w_norm))
+        do i=1_i64,ndims
+            do j=i,ndims
+                xcov(j,i) = dsum(w_norm*x_centered(:,i)*x_centered(:,j))
+            end do
+            xcov(i:ndims,i) = xcov(i:ndims,i)/bessel
+            xcov(i,i) = xcov(i,i) + eps_sp
+        end do
+        do i=2_i64,ndims
+            x_row(1_i64:i-1_i64) = xcov(i,1_i64:i-1_i64)
+            do j=1_i64,i-1_i64
+                xcov(j,i) = x_row(j)
+            end do
+        end do
+    end subroutine cov_weighted_sp
+
+    pure subroutine cov_weighted_dp(x, w, xcov)
+        real(kind=dp), intent(in) :: x(:,:), w(:)
+        real(kind=dp), intent(out) :: xcov(size(x, dim=1, kind=i64),size(x, dim=1, kind=i64))
+        integer(kind=i64) :: ndims, i, j
+        real(kind=dp) :: x_row(size(x, dim=2, kind=i64)), u, x_centered(size(x, dim=2, kind=i64),size(x, dim=1, kind=i64)), &
+                         bessel, w_norm(size(x, dim=2, kind=i64))
+        call debug_error_condition(logical(size(x, dim=2, kind=i64) < 2_i64, kind=c_bool), &
+                                   'module STATISTICS :: cov subroutine invalid for array with dim=2 < 2')
+        call debug_error_condition(logical(size(x, dim=2, kind=i64) /= size(w), kind=c_bool), &
+                                   'module STATISTICS :: cov subroutine number of samples in x must match size of w')
+        call normalize(w, w_norm)
+        ndims = size(x, dim=1, kind=i64)
+        do i=1_i64,ndims
+            x_row = x(i,:)
+            u = vdot(w_norm, x_row)
+            x_centered(:,i) = x_row - u
+        end do
+        bessel = 1.0_dp/(1.0_dp - vdot(w_norm, w_norm))
+        do i=1_i64,ndims
+            do j=i,ndims
+                xcov(j,i) = dsum(w_norm*x_centered(:,i)*x_centered(:,j))
+            end do
+            xcov(i:ndims,i) = xcov(i:ndims,i)/bessel
+            xcov(i,i) = xcov(i,i) + eps_dp
+        end do
+        do i=2_i64,ndims
+            x_row(1_i64:i-1_i64) = xcov(i,1_i64:i-1_i64)
+            do j=1_i64,i-1_i64
+                xcov(j,i) = x_row(j)
+            end do
+        end do
+    end subroutine cov_weighted_dp
 
 end module statistics
