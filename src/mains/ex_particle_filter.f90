@@ -41,7 +41,7 @@ private
 
     public :: debug, debug_run, debug_init, dp, nmi2ft, ft2nmi, deg2rad_dp, rad2deg_dp, g, pi_dp, twopi_dp, &
               perfect_cart2pol, generate_measurements, initialize_particles, convert_particles_cart2pol, &
-              generate_state_estimate, calculate_weights_gaussian, calculate_weights_student_t, apply_roughening, &
+              generate_state_estimate, calculate_weights_gaussian, calculate_weights_student_t, regularize_covariance, &
               calculate_kernel_bandwidth, apply_kernel_smoothing, calculate_weights, &
               resample_cartesian_particles, resample_systematic, resample_multinomial, resample_residual, resample_stratified, &
               fly_constant_acceleration, propagate_particles, apply_constraints, resample_jerk, dump_particles, &
@@ -216,7 +216,6 @@ contains
             end if
             if (ballistic_particles) then
                 cartesian_particles(2,i) = max(0.0_dp, cartesian_particles(2,i))
-                cartesian_particles(3,i) = sign(cartesian_particles(3,i), -1.0_dp)
                 cartesian_particles(4,i) = abs(cartesian_particles(4,i))
             end if
         end do
@@ -439,20 +438,26 @@ contains
         weights = inv_n
     end
 
-    impure subroutine apply_roughening(z_scale, n, particles)
+    impure subroutine regularize_covariance(z_scale, n, particles, weights, jerk_sig)
         real(dp), intent(in) :: z_scale
         integer, intent(in) :: n
-        real(dp), intent(inout) :: particles(:,:)
+        real(dp), intent(inout) :: particles(:,:), weights(:), jerk_sig(:)
         real(dp) :: particles_cov(size(particles,dim=1),size(particles,dim=1)), &
-                    mu_zero(size(particles,dim=1)), z(size(particles,dim=1),size(particles,dim=2))
-        integer :: i
-        call debug_error_condition(size(particles, dim=2) /= n, 'mismatch in particles shape')
-        call cov(particles, particles_cov)
+                    mu_zero(size(particles,dim=1)), z(size(particles,dim=1),size(particles,dim=2)), &
+                    new_particles(size(particles,dim=1),size(particles,dim=2))
+        integer :: i, particles_ii(n)
+        call debug_error_condition(size(particles, dim=2) /= n, 'must have n particles')
+        call debug_error_condition(size(weights) /= n, 'size of weights must match n')
+        call debug_error_condition(size(jerk_sig) /= n, 'size of jerk_sig must match n')
+        call cov(particles, weights, particles_cov)
         mu_zero = 0.0_dp
         call random_normal(z, mu_zero, particles_cov)
+        call random_uniform(particles_ii, 1, n)
         do concurrent (i=1:n)
-            particles(:,i) = particles(:,i) + z(:,i)*z_scale
+            new_particles(:,i) = particles(:,particles_ii(i)) + z_scale*z(:,i)
         end do
+        particles = new_particles
+        weights = 1.0_dp/real(n, kind=dp)
     end
 
     pure subroutine calculate_kernel_bandwidth(n, particles, weights, h)
@@ -516,11 +521,12 @@ contains
         integer :: i
         call debug_error_condition(size(cartesian_particles, dim=2) /= n, 'mismatch in cartesian_particles shape')
         call debug_error_condition(size(jerk_sig) /= n, 'mismatch in jerk_sig shape')
-        call random_normal(jx, 0.0_dp, 1.0_dp)
-        jx = jx*jerk_sig
         if (ballistic_particles) then
+            jx = 0.0_dp
             jy = 0.0_dp
         else
+            call random_normal(jx, 0.0_dp, 1.0_dp)
+            jx = jx*jerk_sig
             call random_normal(jy, 0.0_dp, 1.0_dp)
             jy = jy*jerk_sig
         end if
@@ -610,7 +616,7 @@ program ex_particle_filter
 use, non_intrinsic :: pf
 implicit none
 
-    integer, parameter :: max_trials = 256
+    integer, parameter :: max_trials = 1024
     real(dp), parameter :: max_rng   = 500.0_dp*nmi2ft, &
                            max_spd   = 10000.0_dp, &
                            max_acc   = 9.0_dp*g, &
@@ -654,11 +660,11 @@ implicit none
                  polar_particles(3,num_particles), &
                  jerk_sig(num_particles))
         write(num_particles_str,'(a,i0)') ' | num_particles: ',num_particles
-    do neff_pass_int=15,25 !! respample when Neff is 5-100% of num_particles                                        
+    do neff_pass_int=5,100,5 !! respample when Neff is 5-100% of num_particles                                        
         neff_thresh = real(neff_pass_int, kind=dp)/100.0_dp                                                           
         neff_pass = ceiling(neff_thresh*num_particles)
         write(neff_pass_int_str,'(a,f0.2)') ' | neff_thresh: ',neff_thresh
-    do rough_fac_int=25,45 !! scaling Neff**(-1/(d+4))
+    do rough_fac_int=5,100,5 !! scaling Neff**(-1/(d+4))
         rough_fac = real(rough_fac_int,dp)/100.0_dp
         write(rough_fac_int_str,'(a,f0.2)') ' | rough_fac: ',rough_fac
     do init_vt_method=1,1 !! tangential velocity component initialization
@@ -682,7 +688,7 @@ implicit none
                 error stop 'not implemented'
         end select
         write(init_vt_method_str,'(a)') ' | vt_method: '//trim(init_vt_mode)
-    do likelihood_method=1,1 !! gaussian or student_t
+    do likelihood_method=1,2 !! gaussian or student_t
         select case (likelihood_method)
             case (1)
                 likelihood_mode = 'gaussian'
@@ -694,8 +700,10 @@ implicit none
                 error stop 'not implemented'
         end select
         write(likelihood_method_str,'(a)') ' | likelihood_method: '//trim(likelihood_mode)
-    do resampling_method=3,3 !! select case on method used
+    do resampling_method=0,0 !! select case on method used
         select case (resampling_method)
+            case (0)
+                resample_strategy = 'covariance_regularization'
             case (1)
                 resample_strategy = 'systematic'
                 resample_subroutine => resample_systematic
@@ -712,7 +720,7 @@ implicit none
                 error stop 'not implemented yet'
         end select
         write(resampling_method_str,'(a)') ' | resample_strategy: '//trim(resample_strategy)
-    do roughening_method=4,4 !! select case on method used
+    do roughening_method=1,2 !! select case on method used
         select case (roughening_method)
             case (1)
                 roughen_strategy = 'cov_reg'
@@ -751,9 +759,9 @@ implicit none
         else
             ballistic_particles = .false. !! even tmax assume random jerk
         end if
-    do dr=250,250,5 !! NMI
+    do dr=50,250,50 !! NMI
         write(dr_str,'(a,i0)') ' | dr: ',dr
-    loop_spd: do spd=3,3 !! ~Mach
+    loop_spd: do spd=1500,9000,1500 !! ~Mach
         write(spd_str,'(a,i0)') ' | spd: ',spd
     !$omp parallel do default(firstprivate) private(neff0, t) shared(x_err, y_err, vx_err, vy_err, ax_err, ay_err, pos_err, &
     !$omp&                                                           vel_err, acc_err, rng_err, ang_err, rngrt_err)
@@ -763,8 +771,8 @@ implicit none
         tgt_cart = 0.0_dp !! initialize all state components to zero (0.0)
         tgt_cart(1) = dr*nmi2ft                                       !! x position [ft]
         tgt_cart(2) = 1.0_dp                                          !! y position [ft]
-        tgt_cart(3) = -real(spd,dp)*1000.0_dp*cos(45.0_dp*deg2rad_dp) !! vx velocity [ft/sec]
-        tgt_cart(4) = real(spd,dp)*1000.0_dp*sin(45.0_dp*deg2rad_dp)  !! vy velocity [ft/sec]
+        tgt_cart(3) = -real(spd,dp)*cos(45.0_dp*deg2rad_dp) !! vx velocity [ft/sec]
+        tgt_cart(4) = real(spd,dp)*sin(45.0_dp*deg2rad_dp)  !! vy velocity [ft/sec]
         tgt_cart(5) = 0.0_dp                                          !! ax acceleration [ft/sec**2]
         tgt_cart(6) = -1.0_dp*g                                       !! ay acceleration [ft/sec**2]
         call perfect_cart2pol(obs_cart, tgt_cart, tgt_pol)
@@ -828,19 +836,19 @@ implicit none
                 write(*,'(a,f0.1)') '  Neff before resample: ',neff0
             end if
             if (neff0 < neff_pass) then
-                call resample_subroutine(num_particles, cartesian_particles, weights, jerk_sig)
-                if (debug) then
-                    call generate_state_estimate(est_cart, num_particles, cartesian_particles, weights)
-                    write(*,'(6(a,f0.1))') 'POSTRESAMPLE x: ',est_cart(1),', y: ',est_cart(2),', vx: ',est_cart(3), &
-                                                     ', vy: ',est_cart(4), ', ax: ',est_cart(5),', ay: ',est_cart(6)
-                end if
-                if (roughening_method > 2) call calculate_kernel_bandwidth(num_particles, cartesian_particles, weights, h)
+!                call resample_subroutine(num_particles, cartesian_particles, weights, jerk_sig)
+!                if (debug) then
+!                    call generate_state_estimate(est_cart, num_particles, cartesian_particles, weights)
+!                    write(*,'(6(a,f0.1))') 'POSTRESAMPLE x: ',est_cart(1),', y: ',est_cart(2),', vx: ',est_cart(3), &
+!                                                     ', vy: ',est_cart(4), ', ax: ',est_cart(5),', ay: ',est_cart(6)
+!                end if
+!                if (roughening_method > 2) call calculate_kernel_bandwidth(num_particles, cartesian_particles, weights, h)
                 select case (roughening_method)
                     case (1) !! covariance regularization
-                        call apply_roughening(rough_fac, num_particles, cartesian_particles)
+                        call regularize_covariance(rough_fac, num_particles, cartesian_particles, weights, jerk_sig)
                     case (2) !! covariance regularization with neff scaling
-                        call apply_roughening(rough_fac*neff0**(-1.0_dp/(size(cartesian_particles,dim=1)+4)), &
-                                              num_particles, cartesian_particles)
+                        call regularize_covariance(rough_fac*neff0**(-1.0_dp/(size(cartesian_particles,dim=1)+4)), &
+                                              num_particles, cartesian_particles, weights, jerk_sig)
                     case (3) !! pre-resample bandwidth kernel smoothing
                         call apply_kernel_smoothing(h, rough_fac, num_particles, cartesian_particles)
                     case (4) !! pre-resample bandwidth kernel smoothing with neff scaling
