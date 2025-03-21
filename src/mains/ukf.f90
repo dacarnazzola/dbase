@@ -37,10 +37,10 @@ contains
         real(dp), intent(in) :: obs(6), meas(4), meas_sig(4)
         type(sr_ukf_type), intent(out) :: filter
         real(dp), intent(in), optional :: k, a, b, def_rng, def_vel(2), def_acc(2), max_vel, max_acc
-        real(dp) :: trk_n, rng_use, cos_ang, sin_ang, vt, trk_spd, jrjt(6,6)
+        real(dp) :: trk_n, rng_use, cos_ang, sin_ang, v_t, trk_spd, jrjt(6,6), v_var
         call debug_error_condition(meas_sig(2) <= 0.0_dp, &
                                    'track initialization not implemented for measurements lacking angle information')
-        ! override any filter defaults with provided optional values
+        !! override any filter defaults with provided optional values
         if (present(k)) filter%ut_kappa = k
         if (present(a)) filter%ut_alpha = a
         if (present(b)) filter%ut_beta = b
@@ -55,7 +55,7 @@ contains
                                    'invalid velocity initialization, magnitude of default > maximum ILLEGAL')
         call debug_error_condition(vmag(filter%default_acceleration) > filter%maximum_acceleration, &
                                    'invalid acceleration initialization, magnitude of default > maximum ILLEGAL')
-        ! initialize track estimate based on observer state and measurement
+        !! initialize track estimate based on observer state and measurement
         cos_ang = cos(meas(2))
         sin_ang = sin(meas(2))
         if (meas_sig(1) > 0.0_dp) then !! measurement contains range information
@@ -66,16 +66,16 @@ contains
         filter%state_estimate(1) = obs(1) + rng_use*cos_ang
         filter%state_estimate(2) = obs(2) + rng_use*sin_ang
         if ((meas_sig(3) > 0.0_dp) .and. (meas_sig(4) > 0.0_dp)) then !! measurement contains range rate AND angle rate information
-            vt = rng_use*meas(4)
-            filter%state_estimate(3) = obs(3) + meas(3)*cos_ang - vt*sin_ang
-            filter%state_estimate(4) = obs(4) + meas(3)*sin_ang + vt*cos_ang 
+            v_t = rng_use*meas(4)
+            filter%state_estimate(3) = obs(3) + meas(3)*cos_ang - v_t*sin_ang
+            filter%state_estimate(4) = obs(4) + meas(3)*sin_ang + v_t*cos_ang 
         else if (meas_sig(3) > 0.0_dp) then !! measurement contains ONLY range rate information
             filter%state_estimate(3) = obs(3) + meas(3)*cos_ang
             filter%state_estimate(4) = obs(4) + meas(3)*sin_ang
         else if (meas_sig(4) > 0.0_dp) then !! measurement contains ONLY angle rate information
-            vt = rng_use*meas(4)
-            filter%state_estimate(3) = obs(3) - vt*sin_ang
-            filter%state_estimate(4) = obs(4) + vt*cos_ang 
+            v_t = rng_use*meas(4)
+            filter%state_estimate(3) = obs(3) - v_t*sin_ang
+            filter%state_estimate(4) = obs(4) + v_t*cos_ang 
         else !! measurement contains NO velocity information
             filter%state_estimate(3:4) = filter%default_velocity
         end if
@@ -87,33 +87,41 @@ contains
                 filter%state_estimate(3:4) = filter%state_estimate(3:4)/(trk_spd/filter%maximum_velocity)
             else !! measurement LACKS range information and CONTAINS angle rate information
                 !! first, remove current angle rate contribution to velocity
-                filter%state_estimate(3) = filter%state_estimate(3) + vt*sin_ang
-                filter%state_estimate(4) = filter%state_estimate(4) - vt*cos_ang
+                filter%state_estimate(3) = filter%state_estimate(3) + v_t*sin_ang
+                filter%state_estimate(4) = filter%state_estimate(4) - v_t*cos_ang
                 !! next, calculate the maximum tangential velocity and corrected state estimate velocity components
                 trk_spd = sqrt(filter%state_estimate(3)**2 + filter%state_estimate(4)**2)
-                vt = sqrt(max(0.0_dp, filter%maximum_velocity**2 - trk_spd**2))
-                filter%state_estimate(3) = filter%state_estimate(3) - vt*sin_ang
-                filter%state_estimate(4) = filter%state_estimate(4) + vt*cos_ang
+                v_t = sqrt(max(0.0_dp, filter%maximum_velocity**2 - trk_spd**2))
+                filter%state_estimate(3) = filter%state_estimate(3) - v_t*sin_ang
+                filter%state_estimate(4) = filter%state_estimate(4) + v_t*cos_ang
                 !! next, calculate rng_use based on the maximum tangential velocity and measured angle rate
                 if (.not.nearly(meas(4), 0.0_dp)) then
-                    rng_use = vt/meas(4)
+                    rng_use = v_t/meas(4)
                     !! next, reposition state estimate position components based on updated rng_use
                     filter%state_estimate(1) = obs(1) + rng_use*cos_ang
                     filter%state_estimate(2) = obs(2) + rng_use*sin_ang
                 end if
             end if
         end if
-        ! assume no acceleration
+        !! assume no acceleration
         filter%state_estimate(5:6) = filter%default_acceleration
-        ! initialize covariance as J * R * transpose(J), where J is the Jacobian of the state space and R is the measurement covariance
+        !! initialize covariance as J * R * transpose(J), where J is the Jacobian of the state space and R is the measurement covariance
         call calculate_jrjt(obs, filter%state_estimate, meas_sig, jrjt)
         if (meas_sig(1) < 0.0_dp) then
             jrjt(1,1) = jrjt(1,1) + rng_use**2/3.0_dp
             jrjt(2,2) = jrjt(2,2) + rng_use**2/3.0_dp
         end if
-        if ((meas_sig(3) < 0.0_dp) .or. (meas_sig(4) < 0.0_dp)) then
+        if ((meas_sig(3) < 0.0_dp) .and. (meas_sig(4) < 0.0_dp)) then
             jrjt(3,3) = jrjt(3,3) + filter%maximum_velocity**2/3.0_dp
             jrjt(4,4) = jrjt(4,4) + filter%maximum_velocity**2/3.0_dp
+        else if (meas_sig(3) < 0.0_dp) then !! missing range rate information, add radial velocity uncertainty
+            ! I think this should look like the case for missing meas_sig(4), but probably some signs on sin_ang and cos_ang are different...
+        else if (meas_sig(4) < 0.0_dp) then !! missing angle rate information, add tangential velocity uncertainty
+            v_var = filter%maximum_velocity**2/3.0_dp
+            jrjt(3,3) = jrjt(3,3) + v_var*sin_ang**2
+            jrjt(4,3) = jrjt(4,3) - v_var*cos_ang*sin_ang
+            jrjt(3,4) = jrjt(3,4) - v_var*cos_ang*sin_ang
+            jrjt(4,4) = jrjt(4,4) + v_var*cos_ang**2
         end if
         jrjt(5,5) = jrjt(5,5) + filter%maximum_acceleration**2/3.0_dp
         jrjt(6,6) = jrjt(6,6) + filter%maximum_acceleration**2/3.0_dp
