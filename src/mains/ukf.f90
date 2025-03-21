@@ -72,8 +72,8 @@ contains
             filter%state_estimate(4) = obs(4) + meas(3)*sin_ang
         else if (meas_sig(4) > 0.0_dp) then !! measurement contains ONLY angle rate information
             vt = rng_use*meas(4)
-            filter%state_estimate(3) = -vt*sin_ang
-            filter%state_estimate(4) = vt*cos_ang 
+            filter%state_estimate(3) = obs(3) - vt*sin_ang
+            filter%state_estimate(4) = obs(4) + vt*cos_ang 
         else !! measurement contains NO velocity information
             filter%state_estimate(3:4) = filter%default_velocity
         end if
@@ -93,14 +93,12 @@ contains
                 filter%state_estimate(3) = filter%state_estimate(3) - vt*sin_ang
                 filter%state_estimate(4) = filter%state_estimate(4) + vt*cos_ang
                 !! next, calculate rng_use based on the maximum tangential velocity and measured angle rate
-                if (nearly(meas(4), 0.0_dp)) then
-                    rng_use = filter%default_range !! fall back to filter's default_range
-                else
+                if (.not.nearly(meas(4), 0.0_dp)) then
                     rng_use = vt/meas(4)
+                    !! next, reposition state estimate position components based on updated rng_use
+                    filter%state_estimate(1) = obs(1) + rng_use*cos_ang
+                    filter%state_estimate(2) = obs(2) + rng_use*sin_ang
                 end if
-                !! next, reposition state estimate position components based on updated rng_use
-                filter%state_estimate(1) = obs(1) + rng_use*cos_ang
-                filter%state_estimate(2) = obs(2) + rng_use*sin_ang
             end if
         end if
         ! assume no acceleration
