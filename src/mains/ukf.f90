@@ -11,6 +11,8 @@ private
     real(dp), parameter :: global_minimum_range = 1.0e-6_dp
 
     type :: sr_ukf_type
+        !! an uninitialized sr_ukf_type will have negative negative time, default initialization will set this to 0.0
+        real(dp) :: state_estimate_time = -1.0_dp
         !! default values for unscented transform given below, alternate defaults commented out
         real(dp) :: ut_kappa = 0.0_dp ! 3.0_dp - real(size(state_estimate),dp)
         real(dp) :: ut_alpha = 1.0_dp ! 1.0_dp
@@ -24,23 +26,31 @@ private
         !! state_estimate maximum values
         real(dp) :: maximum_velocity = 10000.0_dp
         real(dp) :: maximum_acceleration = 9.0_dp*g
+        !! model process noise should handle maneuvers up to process_noise_g g's (3.0 = 3 g's)
+        real(dp) :: process_noise_g = 3.0_dp
         !! state_estimate and covariance_square_root have no sensible default values
         real(dp) :: state_estimate(6)
         real(dp) :: covariance_square_root(6,6)
     end type sr_ukf_type
 
-    public :: sr_ukf_type, initialize_sr_ukf
+    public :: sr_ukf_type, initialize_sr_ukf, filter_time_update
 
 contains
 
-    pure subroutine initialize_sr_ukf(obs, meas, meas_sig, filter, k, a, b, def_rng, def_vel, def_acc, max_vel, max_acc)
+    pure subroutine initialize_sr_ukf(obs, meas, meas_sig, filter, t, g, k, a, b, def_rng, def_vel, def_acc, max_vel, max_acc)
         real(dp), intent(in) :: obs(6), meas(4), meas_sig(4)
         type(sr_ukf_type), intent(out) :: filter
-        real(dp), intent(in), optional :: k, a, b, def_rng, def_vel(2), def_acc(2), max_vel, max_acc
+        real(dp), intent(in), optional :: t, g, k, a, b, def_rng, def_vel(2), def_acc(2), max_vel, max_acc
         real(dp) :: trk_n, rng_use, cos_ang, sin_ang, v_t, trk_spd, jrjt(6,6), dim_var
         call debug_error_condition(meas_sig(2) <= 0.0_dp, &
                                    'track initialization not implemented for measurements lacking angle information')
         !! override any filter defaults with provided optional values
+        if (present(t)) then
+            filter%state_estimate_time = t
+        else
+            filter%state_estimate_time = 0.0_dp
+        end if
+        if (present(g)) filter%process_noise_g = g
         if (present(k)) filter%ut_kappa = k
         if (present(a)) filter%ut_alpha = a
         if (present(b)) filter%ut_beta = b
@@ -106,7 +116,7 @@ contains
         !! assume no acceleration
         filter%state_estimate(5:6) = filter%default_acceleration
         !! initialize covariance as J * R * transpose(J), where J is the Jacobian of the state space and R is the measurement covariance
-        call calculate_jrjt(obs, filter%state_estimate, meas_sig, jrjt)
+        call generate_jrjt(obs, filter%state_estimate, meas_sig, jrjt)
         if (meas_sig(1) < 0.0_dp) then
             dim_var = (0.5_dp*rng_use)**2/3.0_dp
             jrjt(1,1) = jrjt(1,1) + dim_var*cos_ang**2
@@ -137,7 +147,7 @@ contains
         call chol(jrjt, filter%covariance_square_root)
     end
 
-    pure subroutine calculate_jrjt(obs, tgt, meas_sig, jrjt)
+    pure subroutine generate_jrjt(obs, tgt, meas_sig, jrjt)
         real(dp), intent(in) :: obs(6), tgt(6), meas_sig(4)
         real(dp), intent(out) :: jrjt(6,6)
         integer :: i, meas_dim
@@ -189,6 +199,39 @@ contains
         else
             pol(3:4) = 0.0_dp
         end if
+    end
+
+    pure subroutine filter_time_update(filter, t)
+        type(sr_ukf_type), intent(inout) :: filter
+        real(dp), intent(in) :: t
+        real(dp) :: dt, sigma_points(size(filter%state_estimate),2*size(filter%state_estimate)+1), &
+                    wm(2*size(filter%state_estimate)+1), wc(2*size(filter%state_estimate)+1)
+        call debug_error_condition(filter%state_estimate_time < 0.0_dp, 'filter is not initialized')
+        dt = t - filter%state_estimate_time
+        call debug_error_condition(dt < 0.0_dp, 'negative dt time update not implemented')
+        filter%state_estimate_time = t
+        if (nearly(dt, 0.0_dp)) return !! return early if dt is approximately 0.0
+        call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_lambda, filter%ut_alpha, &
+                                   filter%ut_beta, sigma_points, wm, wc)
+    end
+
+    pure subroutine generate_sigma_points(state, sqrt_cov, lambda, alpha, beta, sigma_points, wm, wc)
+        real(dp), intent(in) :: state(6), sqrt_cov(6,6), lambda, alpha, beta
+        real(dp), intent(out) :: sigma_points(size(state),2*size(state)+1), wm(2*size(state)+1), wc(2*size(state)+1)
+        integer :: trk_n, i
+        real(dp) :: trk_n_dp, y
+        trk_n = size(state)
+        trk_n_dp = real(trk_n, kind=dp)
+        y = sqrt(trk_n_dp + lambda)
+        sigma_points(:,1) = state
+        wm = lambda/(2.0_dp*(trk_n_dp + lambda))
+        wm(1) = 2.0_dp*wm(1)
+        wc = wm
+        wc(1) = wc(1) + (1.0_dp - alpha**2 + beta)
+        do i=1,trk_n
+            sigma_points(:,i+1) = state + y*sqrt_cov(:,i)
+            sigma_points(:,i+1+trk_n) = state - y*sqrt_cov(:,i)
+        end do
     end
 
 end module ukf
