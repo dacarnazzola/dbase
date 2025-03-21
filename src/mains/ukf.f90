@@ -3,10 +3,12 @@ use, non_intrinsic :: kinds, only: dp
 use, non_intrinsic :: constants, only: nmi2ft_dp
 use, non_intrinsic :: system, only: debug_error_condition, nearly
 use, non_intrinsic :: vector_math, only: vmag
+use, non_intrinsic :: matrix_math, only: chol
 implicit none
 private
 
     real(dp), parameter :: g = 32.2_dp
+    real(dp), parameter :: global_minimum_range = 1.0e-6_dp
 
     type :: sr_ukf_type
         !! default values for unscented transform given below, alternate defaults commented out
@@ -103,6 +105,76 @@ contains
         end if
         ! assume no acceleration
         filter%state_estimate(5:6) = filter%default_acceleration
+        ! initialize covariance as J * R * transpose(J), where J is the Jacobian of the state space and R is the measurement covariance
+        call calculate_sqrt_jrjt(obs, filter%state_estimate, meas_sig, filter%covariance_square_root)
+    end
+
+    pure subroutine calculate_sqrt_jrjt(obs, tgt, meas_sig, sqrt_cov)
+        real(dp), intent(in) :: obs(6), tgt(6), meas_sig(4)
+        real(dp), intent(out) :: sqrt_cov(6,6)
+        integer :: i, meas_dim
+        real(dp) :: local_obs2tgt_pol(4), cos_ang, sin_ang, j(6,4), r(4,4), p(6,6)
+        call cart2pol(obs, tgt, local_obs2tgt_pol)
+        cos_ang = cos(local_obs2tgt_pol(2))
+        sin_ang = sin(local_obs2tgt_pol(2))
+        r = 0.0_dp
+        meas_dim = 0
+        do i=1,size(meas_sig)
+            if (meas_sig(i) > 0.0_dp) then
+                meas_dim = meas_dim + 1
+                r(meas_dim,meas_dim) = meas_sig(i)
+                select case (i)
+                    case (1) ! d/d_range
+                        j(1,meas_dim) = cos_ang
+                        j(2,meas_dim) = sin_ang
+                        j(3,meas_dim) = -local_obs2tgt_pol(4)*sin_ang
+                        j(4,meas_dim) = local_obs2tgt_pol(4)*cos_ang
+                        j(5,meas_dim) = 0.0_dp
+                        j(6,meas_dim) = 0.0_dp
+                    case (2) ! d/d_angle
+                        j(1,meas_dim) = -local_obs2tgt_pol(1)*sin_ang
+                        j(2,meas_dim) = local_obs2tgt_pol(1)*cos_ang
+                        j(3,meas_dim) = -local_obs2tgt_pol(3)*sin_ang - local_obs2tgt_pol(1)*local_obs2tgt_pol(4)*cos_ang
+                        j(4,meas_dim) = local_obs2tgt_pol(3)*cos_ang - local_obs2tgt_pol(1)*local_obs2tgt_pol(4)*sin_ang
+                        j(5,meas_dim) = 0.0_dp
+                        j(6,meas_dim) = 0.0_dp
+                    case (3) ! d/d_range_rate
+                        j(1,meas_dim) = 0.0_dp
+                        j(2,meas_dim) = 0.0_dp
+                        j(3,meas_dim) = cos_ang
+                        j(4,meas_dim) = sin_ang
+                        j(5,meas_dim) = 0.0_dp
+                        j(6,meas_dim) = 0.0_dp
+                    case (4) ! d/d_angle_rate
+                        j(1,meas_dim) = 0.0_dp
+                        j(2,meas_dim) = 0.0_dp
+                        j(3,meas_dim) = -local_obs2tgt_pol(1)*sin_ang
+                        j(4,meas_dim) = local_obs2tgt_pol(1)*cos_ang
+                        j(5,meas_dim) = 0.0_dp
+                        j(6,meas_dim) = 0.0_dp
+                    case default
+                        error stop 'this block should be unreachable'
+                end select
+            end if
+        end do
+        p = matmul(j, matmul(r, transpose(j))) ! P = J * R * transpose(J)
+        call chol(p, sqrt_cov) ! S = sqrt(P)
+    end
+
+    pure subroutine cart2pol(obs, tgt, pol)
+        real(dp), intent(in) :: obs(6), tgt(6)
+        real(dp), intent(out) :: pol(4)
+        real(dp) :: los(2), losv(2)
+        los = tgt(1:2) - obs(1:2)
+        pol(1) = max(global_minimum_range, sqrt(los(1)**2 + los(2)**2))
+        pol(2) = atan2(los(2), los(1))
+        losv = tgt(3:4) - obs(3:4)
+        if (pol(1) > global_minimum_range) then
+            pol(3) = (losv(1)*los(1) + losv(2)*los(2))/pol(1)
+            pol(4) = (losv(2)*los(1) - losv(1)*los(2))/(pol(1)**2)
+        else
+            pol(3:4) = 0.0_dp
+        end if
     end
 
 end module ukf
