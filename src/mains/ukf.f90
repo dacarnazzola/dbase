@@ -51,7 +51,7 @@ contains
         call debug_error_condition(filter%default_velocity > filter%maximum_velocity, &
                                    'invalid velocity initialization, default > maximum ILLEGAL')
         call debug_error_condition(filter%default_acceleration > filter%maximum_acceleration, &
-                                   'invalid velocity initialization, default > maximum ILLEGAL')
+                                   'invalid acceleration initialization, default > maximum ILLEGAL')
         ! initialize track estimate based on observer state and measurement
         cos_ang = cos(meas(2))
         sin_ang = sin(meas(2))
@@ -65,10 +65,9 @@ contains
         if (meas_sig(3) > 0.0_dp) then !! measurement contains range rate information
             filter%state_estimate(3) = obs(3) + meas(3)*cos_ang
             filter%state_estimate(4) = obs(4) + meas(3)*sin_ang 
-            trk_spd = sqrt(filter%state_estimate(3)**2 + filter%state_estimate(4)**2)
         else
-            filter%state_estimate(3) = 0.0_dp
-            filter%state_estimate(4) = 0.0_dp
+            filter%state_estimate(3) = filter%default_velocity
+            filter%state_estimate(4) = filter%default_velocity
         end if
         if (meas_sig(4) > 0.0_dp) then !! measurement contains angle rate information
             vt = rng_use*meas(4)
