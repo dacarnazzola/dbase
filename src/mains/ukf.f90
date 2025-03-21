@@ -108,15 +108,15 @@ contains
         ! initialize covariance as J * R * transpose(J), where J is the Jacobian of the state space and R is the measurement covariance
         call calculate_jrjt(obs, filter%state_estimate, meas_sig, jrjt)
         if (meas_sig(1) < 0.0_dp) then
-            jrjt(1,1) = rng_use/12.0_dp
-            jrjt(2,2) = rng_use/12.0_dp
+            jrjt(1,1) = jrjt(1,1) + rng_use**2/3.0_dp
+            jrjt(2,2) = jrjt(2,2) + rng_use**2/3.0_dp
         end if
         if ((meas_sig(3) < 0.0_dp) .or. (meas_sig(4) < 0.0_dp)) then
-            jrjt(3,3) = filter%maximum_velocity/12.0_dp
-            jrjt(4,4) = filter%maximum_velocity/12.0_dp
+            jrjt(3,3) = jrjt(3,3) + filter%maximum_velocity**2/3.0_dp
+            jrjt(4,4) = jrjt(4,4) + filter%maximum_velocity**2/3.0_dp
         end if
-        jrjt(5,5) = filter%maximum_acceleration/12.0_dp
-        jrjt(6,6) = filter%maximum_acceleration/12.0_dp
+        jrjt(5,5) = jrjt(5,5) + filter%maximum_acceleration**2/3.0_dp
+        jrjt(6,6) = jrjt(6,6) + filter%maximum_acceleration**2/3.0_dp
         call chol(jrjt, filter%covariance_square_root)
     end
 
