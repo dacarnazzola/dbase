@@ -115,8 +115,9 @@ contains
             jrjt(2,2) = jrjt(2,2) + dim_var*sin_ang**2
         end if
         if ((meas_sig(3) < 0.0_dp) .and. (meas_sig(4) < 0.0_dp)) then
-            jrjt(3,3) = jrjt(3,3) + filter%maximum_velocity**2/3.0_dp
-            jrjt(4,4) = jrjt(4,4) + filter%maximum_velocity**2/3.0_dp
+            dim_var = filter%maximum_velocity**2/3.0_dp
+            jrjt(3,3) = jrjt(3,3) + dim_var
+            jrjt(4,4) = jrjt(4,4) + dim_var
         else if (meas_sig(3) < 0.0_dp) then !! missing range rate information, add radial velocity uncertainty
             dim_var = filter%maximum_velocity**2/3.0_dp
             jrjt(3,3) = jrjt(3,3) + dim_var*cos_ang**2
@@ -130,8 +131,9 @@ contains
             jrjt(3,4) = jrjt(3,4) - dim_var*cos_ang*sin_ang
             jrjt(4,4) = jrjt(4,4) + dim_var*cos_ang**2
         end if
-        jrjt(5,5) = jrjt(5,5) + filter%maximum_acceleration**2/3.0_dp
-        jrjt(6,6) = jrjt(6,6) + filter%maximum_acceleration**2/3.0_dp
+        dim_var = filter%maximum_acceleration**2/3.0_dp
+        jrjt(5,5) = jrjt(5,5) + dim_var
+        jrjt(6,6) = jrjt(6,6) + dim_var
         call chol(jrjt, filter%covariance_square_root)
     end
 
@@ -143,6 +145,7 @@ contains
         call cart2pol(obs, tgt, local_obs2tgt_pol)
         cos_ang = cos(local_obs2tgt_pol(2))
         sin_ang = sin(local_obs2tgt_pol(2))
+        j = 0.0_dp
         r = 0.0_dp
         meas_dim = 0
         do i=1,size(meas_sig)
@@ -155,31 +158,17 @@ contains
                         j(2,meas_dim) = sin_ang
                         j(3,meas_dim) = -local_obs2tgt_pol(4)*sin_ang
                         j(4,meas_dim) = local_obs2tgt_pol(4)*cos_ang
-                        j(5,meas_dim) = 0.0_dp
-                        j(6,meas_dim) = 0.0_dp
                     case (2) ! d/d_angle
                         j(1,meas_dim) = -local_obs2tgt_pol(1)*sin_ang
                         j(2,meas_dim) = local_obs2tgt_pol(1)*cos_ang
                         j(3,meas_dim) = -local_obs2tgt_pol(3)*sin_ang - local_obs2tgt_pol(1)*local_obs2tgt_pol(4)*cos_ang
                         j(4,meas_dim) = local_obs2tgt_pol(3)*cos_ang - local_obs2tgt_pol(1)*local_obs2tgt_pol(4)*sin_ang
-                        j(5,meas_dim) = 0.0_dp
-                        j(6,meas_dim) = 0.0_dp
                     case (3) ! d/d_range_rate
-                        j(1,meas_dim) = 0.0_dp
-                        j(2,meas_dim) = 0.0_dp
                         j(3,meas_dim) = cos_ang
                         j(4,meas_dim) = sin_ang
-                        j(5,meas_dim) = 0.0_dp
-                        j(6,meas_dim) = 0.0_dp
                     case (4) ! d/d_angle_rate
-                        j(1,meas_dim) = 0.0_dp
-                        j(2,meas_dim) = 0.0_dp
                         j(3,meas_dim) = -local_obs2tgt_pol(1)*sin_ang
                         j(4,meas_dim) = local_obs2tgt_pol(1)*cos_ang
-                        j(5,meas_dim) = 0.0_dp
-                        j(6,meas_dim) = 0.0_dp
-                    case default
-                        error stop 'this block should be unreachable'
                 end select
             end if
         end do
