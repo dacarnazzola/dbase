@@ -37,7 +37,7 @@ contains
         real(dp), intent(in) :: obs(6), meas(4), meas_sig(4)
         type(sr_ukf_type), intent(out) :: filter
         real(dp), intent(in), optional :: k, a, b, def_rng, def_vel(2), def_acc(2), max_vel, max_acc
-        real(dp) :: trk_n, rng_use, cos_ang, sin_ang, vt, trk_spd
+        real(dp) :: trk_n, rng_use, cos_ang, sin_ang, vt, trk_spd, jrjt(6,6)
         call debug_error_condition(meas_sig(2) <= 0.0_dp, &
                                    'track initialization not implemented for measurements lacking angle information')
         ! override any filter defaults with provided optional values
@@ -106,14 +106,25 @@ contains
         ! assume no acceleration
         filter%state_estimate(5:6) = filter%default_acceleration
         ! initialize covariance as J * R * transpose(J), where J is the Jacobian of the state space and R is the measurement covariance
-        call calculate_sqrt_jrjt(obs, filter%state_estimate, meas_sig, filter%covariance_square_root)
+        call calculate_jrjt(obs, filter%state_estimate, meas_sig, jrjt)
+        if (meas_sig(1) < 0.0_dp) then
+            jrjt(1,1) = rng_use/12.0_dp
+            jrjt(2,2) = rng_use/12.0_dp
+        end if
+        if ((meas_sig(3) < 0.0_dp) .or. (meas_sig(4) < 0.0_dp)) then
+            jrjt(3,3) = filter%maximum_velocity/12.0_dp
+            jrjt(4,4) = filter%maximum_velocity/12.0_dp
+        end if
+        jrjt(5,5) = filter%maximum_acceleration/12.0_dp
+        jrjt(6,6) = filter%maximum_acceleration/12.0_dp
+        call chol(jrjt, filter%covariance_square_root)
     end
 
-    pure subroutine calculate_sqrt_jrjt(obs, tgt, meas_sig, sqrt_cov)
+    pure subroutine calculate_jrjt(obs, tgt, meas_sig, jrjt)
         real(dp), intent(in) :: obs(6), tgt(6), meas_sig(4)
-        real(dp), intent(out) :: sqrt_cov(6,6)
+        real(dp), intent(out) :: jrjt(6,6)
         integer :: i, meas_dim
-        real(dp) :: local_obs2tgt_pol(4), cos_ang, sin_ang, j(6,4), r(4,4), p(6,6)
+        real(dp) :: local_obs2tgt_pol(4), cos_ang, sin_ang, j(6,4), r(4,4)
         call cart2pol(obs, tgt, local_obs2tgt_pol)
         cos_ang = cos(local_obs2tgt_pol(2))
         sin_ang = sin(local_obs2tgt_pol(2))
@@ -157,8 +168,7 @@ contains
                 end select
             end if
         end do
-        p = matmul(j, matmul(r, transpose(j))) ! P = J * R * transpose(J)
-        call chol(p, sqrt_cov) ! S = sqrt(P)
+        jrjt = matmul(j(:,1:meas_dim), matmul(r(1:meas_dim,1:meas_dim), transpose(j(:,1:meas_dim)))) ! P = J * R * transpose(J)
     end
 
     pure subroutine cart2pol(obs, tgt, pol)
