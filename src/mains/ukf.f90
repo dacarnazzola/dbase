@@ -1,7 +1,8 @@
 module ukf
 use, non_intrinsic :: kinds, only: dp
 use, non_intrinsic :: constants, only: nmi2ft_dp
-use, non_intrinsic :: system, only: debug_error_condition
+use, non_intrinsic :: system, only: debug_error_condition, nearly
+use, non_intrinsic :: vector_math, only: vmag
 implicit none
 private
 
@@ -16,8 +17,8 @@ private
         real(dp) :: ut_lambda
         !! state_estimate defaults if no measurement information is provided
         real(dp) :: default_range = 500.0_dp*nmi2ft_dp
-        real(dp) :: default_velocity = 0.0_dp
-        real(dp) :: default_acceleration = 0.0_dp
+        real(dp) :: default_velocity(2) = 0.0_dp
+        real(dp) :: default_acceleration(2) = 0.0_dp
         !! state_estimate maximum values
         real(dp) :: maximum_velocity = 10000.0_dp
         real(dp) :: maximum_acceleration = 9.0_dp*g
@@ -33,7 +34,7 @@ contains
     pure subroutine initialize_sr_ukf(obs, meas, meas_sig, filter, k, a, b, def_rng, def_vel, def_acc, max_vel, max_acc)
         real(dp), intent(in) :: obs(6), meas(4), meas_sig(4)
         type(sr_ukf_type), intent(out) :: filter
-        real(dp), intent(in), optional :: k, a, b, def_rng, def_vel, def_acc, max_vel, max_acc
+        real(dp), intent(in), optional :: k, a, b, def_rng, def_vel(2), def_acc(2), max_vel, max_acc
         real(dp) :: trk_n, rng_use, cos_ang, sin_ang, vt, trk_spd
         call debug_error_condition(meas_sig(2) <= 0.0_dp, &
                                    'track initialization not implemented for measurements lacking angle information')
@@ -48,10 +49,10 @@ contains
         if (present(def_acc)) filter%default_acceleration = def_acc
         if (present(max_vel)) filter%maximum_velocity = max_vel
         if (present(max_acc)) filter%maximum_acceleration = max_acc
-        call debug_error_condition(filter%default_velocity > filter%maximum_velocity, &
-                                   'invalid velocity initialization, default > maximum ILLEGAL')
-        call debug_error_condition(filter%default_acceleration > filter%maximum_acceleration, &
-                                   'invalid acceleration initialization, default > maximum ILLEGAL')
+        call debug_error_condition(vmag(filter%default_velocity) > filter%maximum_velocity, &
+                                   'invalid velocity initialization, magnitude of default > maximum ILLEGAL')
+        call debug_error_condition(vmag(filter%default_acceleration) > filter%maximum_acceleration, &
+                                   'invalid acceleration initialization, magnitude of default > maximum ILLEGAL')
         ! initialize track estimate based on observer state and measurement
         cos_ang = cos(meas(2))
         sin_ang = sin(meas(2))
@@ -62,25 +63,27 @@ contains
         end if
         filter%state_estimate(1) = obs(1) + rng_use*cos_ang
         filter%state_estimate(2) = obs(2) + rng_use*sin_ang
-        if (meas_sig(3) > 0.0_dp) then !! measurement contains range rate information
-            filter%state_estimate(3) = obs(3) + meas(3)*cos_ang
-            filter%state_estimate(4) = obs(4) + meas(3)*sin_ang 
-        else
-            filter%state_estimate(3) = filter%default_velocity
-            filter%state_estimate(4) = filter%default_velocity
-        end if
-        if (meas_sig(4) > 0.0_dp) then !! measurement contains angle rate information
+        if ((meas_sig(3) > 0.0_dp) .and. (meas_sig(4) > 0.0_dp)) then !! measurement contains range rate AND angle rate information
             vt = rng_use*meas(4)
-            filter%state_estimate(3) = filter%state_estimate(3) - vt*sin_ang
-            filter%state_estimate(4) = filter%state_estimate(4) + vt*cos_ang
+            filter%state_estimate(3) = obs(3) + meas(3)*cos_ang - vt*sin_ang
+            filter%state_estimate(4) = obs(4) + meas(3)*sin_ang + vt*cos_ang 
+        else if (meas_sig(3) > 0.0_dp) then !! measurement contains ONLY range rate information
+            filter%state_estimate(3) = obs(3) + meas(3)*cos_ang
+            filter%state_estimate(4) = obs(4) + meas(3)*sin_ang
+        else if (meas_sig(4) > 0.0_dp) then !! measurement contains ONLY angle rate information
+            vt = rng_use*meas(4)
+            filter%state_estimate(3) = -vt*sin_ang
+            filter%state_estimate(4) = vt*cos_ang 
+        else !! measurement contains NO velocity information
+            filter%state_estimate(3:4) = filter%default_velocity
         end if
         !! make sure state_estimate does not violate maximum_velocity constraint
         trk_spd = sqrt(filter%state_estimate(3)**2 + filter%state_estimate(4)**2)
         if (trk_spd > filter%maximum_velocity) then
-            if ((meas_sig(1) > 0.0_dp) .or. (meas_sig(4) < 0.0_dp)) then
+            if ((meas_sig(1) > 0.0_dp) .or. (meas_sig(4) < 0.0_dp)) then !! measurement contains range OR lacks angle rate information
                 !! simply scale estimated velocity if range is measured or there is no angle rate contribution
                 filter%state_estimate(3:4) = filter%state_estimate(3:4)/(trk_spd/filter%maximum_velocity)
-            else if ((meas_sig(1) < 0.0_dp) .and. (meas_sig(4) > 0.0_dp)) then!! measurement LACKS range information and CONTAINS angle rate information
+            else !! measurement LACKS range information and CONTAINS angle rate information
                 !! first, remove current angle rate contribution to velocity
                 filter%state_estimate(3) = filter%state_estimate(3) + vt*sin_ang
                 filter%state_estimate(4) = filter%state_estimate(4) - vt*cos_ang
@@ -90,17 +93,18 @@ contains
                 filter%state_estimate(3) = filter%state_estimate(3) - vt*sin_ang
                 filter%state_estimate(4) = filter%state_estimate(4) + vt*cos_ang
                 !! next, calculate rng_use based on the maximum tangential velocity and measured angle rate
-                rng_use = vt/meas(4)
+                if (nearly(meas(4), 0.0_dp)) then
+                    rng_use = filter%default_range !! fall back to filter's default_range
+                else
+                    rng_use = vt/meas(4)
+                end if
                 !! next, reposition state estimate position components based on updated rng_use
                 filter%state_estimate(1) = obs(1) + rng_use*cos_ang
                 filter%state_estimate(2) = obs(2) + rng_use*sin_ang
-            else
-                error stop 'logic error, this block should be unreachable, check combinations of meas_sig'
             end if
         end if
         ! assume no acceleration
-        filter%state_estimate(5) = filter%default_acceleration
-        filter%state_estimate(6) = filter%default_acceleration
+        filter%state_estimate(5:6) = filter%default_acceleration
     end
 
 end module ukf
