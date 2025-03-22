@@ -5,6 +5,7 @@ use, non_intrinsic :: system, only: debug_error_condition, nearly
 use, non_intrinsic :: vector_math, only: vmag
 use, non_intrinsic :: matrix_math, only: chol, qr
 use, non_intrinsic :: array_utils, only: broadcast_sub
+use, non_intrinsic :: random, only: random_normal
 implicit none
 private
 
@@ -39,7 +40,7 @@ private
         end
     end interface
 
-    public :: dp, nmi2ft_dp, deg2rad_dp, g, sr_ukf_type, cart2pol, initialize_sr_ukf, filter_time_update, dynamics_ballistic
+    public :: dp, nmi2ft_dp, deg2rad_dp, g, sr_ukf_type, initialize_sr_ukf, dynamics_ballistic, filter_measurement_update
 
 contains
 
@@ -98,7 +99,7 @@ contains
         else
             default_range = 500.0_dp*nmi2ft_dp
         end if
-        trk_n = size(filter%state_estimate, kind=dp)
+        trk_n = 6.0_dp
         ut_lambda = ut_alpha**2 * (trk_n + ut_kappa) - trk_n
         filter%wx_1 = ut_lambda/(trk_n + ut_lambda)
         filter%wc_1 = filter%wx_1 + 1.0_dp - ut_alpha**2 + ut_beta
@@ -199,7 +200,7 @@ contains
         j = 0.0_dp
         r = 0.0_dp
         meas_dim = 0
-        do i=1,size(meas_sig)
+        do i=1,4
             if (meas_sig(i) > 0.0_dp) then
                 meas_dim = meas_dim + 1
                 r(meas_dim,meas_dim) = meas_sig(i)
@@ -242,14 +243,48 @@ contains
         end if
     end
 
-    impure subroutine filter_time_update(filter, t, state_dynamics_model)
+    pure subroutine filter_measurement_update(obs, meas, meas_sig, filter, t, state_dynamics_model)
+        real(dp), intent(in) :: obs(6), meas(4), meas_sig(4)
         type(sr_ukf_type), intent(inout) :: filter
         real(dp), intent(in) :: t
         procedure(dynamics_model) :: state_dynamics_model
-        real(dp) :: dt, sigma_points(size(filter%state_estimate),2*size(filter%state_estimate)+1), &
-                    amat(size(filter%state_estimate),3*size(filter%state_estimate)+1), sqrt_wc, &
-                    unused_tau(min(size(sigma_points,dim=1),size(sigma_points,dim=2))), &
-                    amat_t(size(amat,dim=2),size(amat,dim=1)), r(size(sigma_points,dim=1),size(sigma_points,dim=1))
+        real(dp) :: sigma_points(6,13), sigma_points_meas(4,13), pred_meas(4)
+        integer :: i, meas_dim, meas_ii(4)
+        !! update filter to current time
+        call filter_time_update(filter, t, state_dynamics_model)
+        !! return early if measurement provides no information
+        if (count(meas_sig > 0.0_dp) < 1) then
+            return
+        else
+        !! otherwise, collect valid measurement dimensions
+            meas_dim = 0
+            meas_ii = -1
+            do i=1,4
+                if (meas_sig(i) > 0.0_dp) then
+                    meas_dim = meas_dim + 1
+                    meas_ii(meas_dim) = i
+                end if
+            end do
+        end if
+        !! generate sigma points
+        call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
+        !! convert sigma_points to measurement space
+        do concurrent (i=1:13)
+            call cart2pol(obs, sigma_points(:,i), sigma_points_meas(:,i))
+        end do
+        !! calculate sigma point weighted average predicted measurement
+        pred_meas = filter%wx_1*sigma_points_meas(:,1)
+        do i=1,6
+            pred_meas = pred_meas + filter%w_2_2n1*(sigma_points_meas(:,i+1) + sigma_points_meas(:,i+7))
+        end do
+        !! calculate innovation
+    end
+
+    pure subroutine filter_time_update(filter, t, state_dynamics_model)
+        type(sr_ukf_type), intent(inout) :: filter
+        real(dp), intent(in) :: t
+        procedure(dynamics_model) :: state_dynamics_model
+        real(dp) :: dt, sigma_points(6,13), amat(6,19), sqrt_wc, unused_tau(6), amat_t(19,6), r(6,6)
         integer :: i
         call debug_error_condition(filter%state_estimate_time < 0.0_dp, 'filter is not initialized')
         dt = t - filter%state_estimate_time
@@ -259,24 +294,23 @@ contains
         !! generate sigma points
         call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
         !! propagate sigma points through system dynamics
-        do concurrent (i=1:size(sigma_points,dim=2))
+        do concurrent (i=1:13)
             call state_dynamics_model(sigma_points(:,i), dt, [filter%maximum_velocity])
         end do
         !! calculate sigma point weighted average state estimate
         filter%state_estimate = filter%wx_1*sigma_points(:,1)
-        do i=1,size(sigma_points,dim=1)
-            filter%state_estimate = filter%state_estimate + filter%w_2_2n1*(sigma_points(:,i+1) + &
-                                                                            sigma_points(:,i+1+size(sigma_points,dim=1)))
+        do i=1,6
+            filter%state_estimate = filter%state_estimate + filter%w_2_2n1*(sigma_points(:,i+1) + sigma_points(:,i+7))
         end do
         !! center sigma points (sigma_points - state_estimate)
         call broadcast_sub(sigma_points, filter%state_estimate)
         !! form A matrix (amat) as [sqrt(w)*centered_sigma_points, sqrt(Q)]
         amat(:,1) = filter%wc_1*sigma_points(:,1)
         sqrt_wc = sqrt(filter%w_2_2n1)
-        do concurrent (i=2:size(sigma_points,dim=2))
+        do concurrent (i=2:13)
             amat(:,i) = sqrt_wc*sigma_points(:,i)
         end do
-        call generate_sqrt_process_noise(filter%process_noise, dt, amat(:,size(sigma_points,dim=2)+1:size(amat,dim=2)))
+        call generate_sqrt_process_noise(filter%process_noise, dt, amat(:,14:19))
         !! calculate new covariance_square_root
         amat_t = transpose(amat)
         call qr(amat_t, unused_tau)
@@ -325,10 +359,8 @@ contains
 
     pure subroutine generate_sqrt_process_noise(noise, dt, sqrt_q)
         real(dp), intent(in) :: noise, dt
-        real(dp), intent(out) :: sqrt_q(:,:)
+        real(dp), intent(out) :: sqrt_q(6,6)
         real(dp) :: qmat(6,6), dt2, dt3, dt4, dt5, g2, g3, g6, g8, g20
-        call debug_error_condition((size(sqrt_q, dim=1) /= 6) .or. (size(sqrt_q, dim=2) /= 6), &
-                                   'process noise matrix (sqrt_q) must be 6x6')
         !! compute constants
         dt2 = dt**2
         dt3 = dt**3
@@ -364,6 +396,25 @@ contains
         call chol(qmat, sqrt_q)
     end
 
+    impure subroutine generate_observation(obs, tgt, meas, meas_sig)
+        real(dp), intent(in) :: obs(6), tgt(6)
+        real(dp), intent(out) :: meas(4)
+        real(dp), intent(in), optional :: meas_sig(4)
+        real(dp) :: z(1)
+        integer :: i
+        call cart2pol(obs, tgt, meas)
+        if (present(meas_sig)) then
+            do i=1,4
+                if (meas_sig(i) > 0.0_dp) then
+                    call random_normal(z, 0.0_dp, meas_sig(i))
+                    meas(i) = meas(i) + z(1)
+                else
+                    meas(i) = huge(1.0_dp)
+                end if
+            end do
+        end if
+    end
+
 end module ukf
 
 
@@ -371,18 +422,33 @@ program ex_ukf
 use, non_intrinsic :: ukf
 implicit none
 
-    type(sr_ukf_type) :: filter
-    real(dp) :: obs(6), tgt(6), meas(4), meas_sig(4)
+    real(dp), parameter :: dt = 1.0_dp
 
+    type(sr_ukf_type) :: filter
+    real(dp) :: obs(6), tgt(6), meas(4), meas_sig(4), t
+
+    !! observer initial conditions
     obs = 0.0_dp
+
+    !! target initial conditions
     tgt = [200.0_dp*nmi2ft_dp, 200000.0_dp, &
            -3000.0_dp*cos(45.0_dp*deg2rad_dp), 3000.0_dp*sin(45.0_dp*deg2rad_dp), &
            0.0_dp, -1.0_dp*g]
 
-    call cart2pol(obs, tgt, meas)
+    !! sensor measurement sigmas
     meas_sig = [100.0_dp, 0.1_dp*deg2rad_dp, 10.0_dp, 0.01_dp*deg2rad_dp]
+
+    !! generate initial measurement and initialize Square Root Unscented Kalman Filter
+    t = 0.0_dp
+    call generate_observation(obs, tgt, meas, meas_sig)
     call initialize_sr_ukf(obs, meas, meas_sig, filter)
 
-    call filter_time_update(filter, 1.0_dp, dynamics_ballistic)
+    !! evolve simulation time
+    t = t + dt
+    call dynamics_ballistic(tgt, dt)
+
+    !! incorporate new measurement
+    call generate_observation(obs, tgt, meas, meas_sig)
+    call filter_measurement_update(obs, meas, meas_sig, filter, t, dynamics_ballistic)
 
 end program ex_ukf
