@@ -28,7 +28,17 @@ private
         real(dp) :: covariance_square_root(6,6)
     end type sr_ukf_type
 
-    public :: sr_ukf_type, initialize_sr_ukf, filter_time_update
+    interface
+        pure subroutine model_dynamics(state, dt, opt_data)
+        import dp
+        implicit none
+            real(dp), intent(inout) :: state(:)
+            real(dp), intent(in) :: dt
+            real(dp), intent(in), optional :: opt_data(:)
+        end
+    end interface
+
+    public :: sr_ukf_type, initialize_sr_ukf, filter_time_update, dynamics_ballistic
 
 contains
 
@@ -229,16 +239,21 @@ contains
         end if
     end
 
-    pure subroutine filter_time_update(filter, t)
+    pure subroutine filter_time_update(filter, t, state_model_dynamics)
         type(sr_ukf_type), intent(inout) :: filter
         real(dp), intent(in) :: t
+        procedure(model_dynamics) :: state_model_dynamics
         real(dp) :: dt, sigma_points(size(filter%state_estimate),2*size(filter%state_estimate)+1)
+        integer :: i
         call debug_error_condition(filter%state_estimate_time < 0.0_dp, 'filter is not initialized')
         dt = t - filter%state_estimate_time
         call debug_error_condition(dt < 0.0_dp, 'negative dt time update not implemented')
         filter%state_estimate_time = t
         if (nearly(dt, 0.0_dp)) return !! return early if dt is approximately 0.0
         call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
+        do concurrent (i=1:size(sigma_points,dim=2))
+            call state_model_dynamics(sigma_points(:,i), dt, [filter%maximum_velocity])
+        end do
     end
 
     pure subroutine generate_sigma_points(state, sqrt_cov, ut_gamma, sigma_points)
@@ -251,6 +266,25 @@ contains
             sigma_points(:,i+1) = state + ut_gamma*sqrt_cov(:,i)
             sigma_points(:,i+1+trk_n) = state - ut_gamma*sqrt_cov(:,i)
         end do
+    end
+
+    pure subroutine dynamics_ballistic(state, dt, opt_data)
+        real(dp), intent(inout) :: state(6)
+        real(dp), intent(in) :: dt
+        real(dp), intent(in), optional :: opt_data(:)
+        real(dp) :: vel_max, spd0
+        if (present(opt_data)) then
+            call debug_error_condition(size(opt_data) /= 1, 'dynamics_ballistic can only accept size 1 optional data')
+            vel_max = opt_data(1)
+        else
+            vel_max = huge(1.0_dp)
+        end if
+        state(5) = 0.0_dp
+        state(6) = -1.0_dp*g
+        state(3:4) = state(3:4) + dt*state(5:6)
+        spd0 = sqrt(state(3)**2 + state(4)**2)
+        if (spd0 > vel_max) state(3:4) = state(3:4)/(spd0/vel_max)
+        state(1:2) = state(1:2) + dt*state(3:4)
     end
 
 end module ukf
