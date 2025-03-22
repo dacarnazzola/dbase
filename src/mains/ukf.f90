@@ -249,18 +249,13 @@ contains
         real(dp) :: dt, sigma_points(size(filter%state_estimate),2*size(filter%state_estimate)+1), &
                     amat(size(filter%state_estimate),3*size(filter%state_estimate)+1), sqrt_wc, &
                     unused_tau(min(size(sigma_points,dim=1),size(sigma_points,dim=2))), &
-                    amat_t(size(amat,dim=2),size(amat,dim=1)), p(6,6)
+                    amat_t(size(amat,dim=2),size(amat,dim=1)), r(size(sigma_points,dim=1),size(sigma_points,dim=1))
         integer :: i
         call debug_error_condition(filter%state_estimate_time < 0.0_dp, 'filter is not initialized')
         dt = t - filter%state_estimate_time
         call debug_error_condition(dt < 0.0_dp, 'negative dt time update not implemented')
         filter%state_estimate_time = t
         if (nearly(dt, 0.0_dp)) return !! return early if dt is approximately 0.0
-        write(*,*) 'original covariance'
-        p = matmul(filter%covariance_square_root, transpose(filter%covariance_square_root))
-        do i=1,6
-            write(*,'(*(e13.6," "))') p(i,:)
-        end do
         !! generate sigma points
         call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
         !! propagate sigma points through system dynamics
@@ -282,27 +277,11 @@ contains
             amat(:,i) = sqrt_wc*sigma_points(:,i)
         end do
         call generate_sqrt_process_noise(filter%process_noise, dt, amat(:,size(sigma_points,dim=2)+1:size(amat,dim=2)))
-        write(*,*) 'square root process noise Q'
-        do i=1,6
-            write(*,'(*(e13.6," "))') amat(i,size(sigma_points,dim=2)+1:size(amat,dim=2))
-        end do
         !! calculate new covariance_square_root
         amat_t = transpose(amat)
         call qr(amat_t, unused_tau)
-        write(*,*) 'amat_t after QR decomposition, upper 6x6 should hold R'
-        do i=1,6
-            write(*,'(*(e13.6," "))') amat_t(i,:)
-        end do
-        call extract_rt(amat_t(1:6,1:6), filter%covariance_square_root)
-        write(*,*) 'transpose(R) is new filter%covariance_square_root'
-        do i=1,6
-            write(*,'(*(e13.6," "))') filter%covariance_square_root(i,:)
-        end do
-        write(*,*) 'updated covariance'
-        p = matmul(filter%covariance_square_root, transpose(filter%covariance_square_root))
-        do i=1,6
-            write(*,'(*(e13.6," "))') p(i,:)
-        end do
+        r = amat_t(1:6,1:6)
+        call extract_rt(r, filter%covariance_square_root)
     end
 
     pure subroutine extract_rt(r, r_upper_triangle_transpose)
@@ -338,9 +317,7 @@ contains
         else
             vel_max = huge(1.0_dp)
         end if
-        state(5) = 0.0_dp
-        state(6) = -1.0_dp*g
-        state(3:4) = state(3:4) + dt*state(5:6)
+        state(4) = state(4) - dt*g
         spd0 = sqrt(state(3)**2 + state(4)**2)
         if (spd0 > vel_max) state(3:4) = state(3:4)/(spd0/vel_max)
         state(1:2) = state(1:2) + dt*state(3:4)
