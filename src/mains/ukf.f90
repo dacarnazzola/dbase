@@ -13,21 +13,16 @@ private
     type :: sr_ukf_type
         !! an uninitialized sr_ukf_type will have negative negative time, default initialization will set this to 0.0
         real(dp) :: state_estimate_time = -1.0_dp
-        !! default values for unscented transform given below, alternate defaults commented out
-        real(dp) :: ut_kappa = 0.0_dp ! 3.0_dp - real(size(state_estimate),dp)
-        real(dp) :: ut_alpha = 1.0_dp ! 1.0_dp
-        real(dp) :: ut_beta = 2.0_dp
-        !! unscented transform lambda is calculated once during initialization based on kappa, alpha, and beta
-        real(dp) :: ut_lambda
-        !! state_estimate defaults if no measurement information is provided
-        real(dp) :: default_range = 500.0_dp*nmi2ft_dp
-        real(dp) :: default_velocity(2) = 0.0_dp
-        real(dp) :: default_acceleration(2) = 0.0_dp
+        !! model process noise should handle maneuvers up to process_noise_g g's (3.0 = 3 g's)
+        real(dp) :: process_noise_g = 3.0_dp
         !! state_estimate maximum values
         real(dp) :: maximum_velocity = 10000.0_dp
         real(dp) :: maximum_acceleration = 9.0_dp*g
-        !! model process noise should handle maneuvers up to process_noise_g g's (3.0 = 3 g's)
-        real(dp) :: process_noise_g = 3.0_dp
+        !! unscented transform weights are calculated once during initialization based on kappa, alpha, and beta
+        real(dp) :: wx_1
+        real(dp) :: wc_1
+        real(dp) :: w_2_2n1
+        real(dp) :: ut_gamma
         !! state_estimate and covariance_square_root have no sensible default values
         real(dp) :: state_estimate(6)
         real(dp) :: covariance_square_root(6,6)
@@ -37,41 +32,74 @@ private
 
 contains
 
-    pure subroutine initialize_sr_ukf(obs, meas, meas_sig, filter, t, g, k, a, b, def_rng, def_vel, def_acc, max_vel, max_acc)
+    pure subroutine initialize_sr_ukf(obs, meas, meas_sig, filter, t, g, max_vel, def_vel, max_acc, def_acc, k, a, b, def_rng)
         real(dp), intent(in) :: obs(6), meas(4), meas_sig(4)
         type(sr_ukf_type), intent(out) :: filter
-        real(dp), intent(in), optional :: t, g, k, a, b, def_rng, def_vel(2), def_acc(2), max_vel, max_acc
-        real(dp) :: trk_n, rng_use, cos_ang, sin_ang, v_t, trk_spd, jrjt(6,6), dim_var
+        real(dp), intent(in), optional :: t, g, max_vel, max_acc, k, a, b, def_rng, def_vel(2), def_acc(2)
+        real(dp) :: trk_n, rng_use, cos_ang, sin_ang, v_t, trk_spd, jrjt(6,6), dim_var, ut_kappa, ut_alpha, ut_beta, ut_lambda, &
+                    default_range, default_velocity(2), default_acceleration(2)
         call debug_error_condition(meas_sig(2) <= 0.0_dp, &
                                    'track initialization not implemented for measurements lacking angle information')
         !! override any filter defaults with provided optional values
         if (present(t)) then
             filter%state_estimate_time = t
+            call debug_error_condition(filter%state_estimate_time < 0.0_dp, 'state_estimate_time must be >= 0.0')
         else
             filter%state_estimate_time = 0.0_dp
         end if
-        if (present(g)) filter%process_noise_g = g
-        if (present(k)) filter%ut_kappa = k
-        if (present(a)) filter%ut_alpha = a
-        if (present(b)) filter%ut_beta = b
-        trk_n = real(size(filter%state_estimate), kind=dp)
-        filter%ut_lambda = filter%ut_alpha**2 * (trk_n + filter%ut_kappa) - trk_n
-        if (present(def_rng)) filter%default_range = def_rng
-        if (present(def_vel)) filter%default_velocity = def_vel
-        if (present(def_acc)) filter%default_acceleration = def_acc
+        if (present(g)) then
+            filter%process_noise_g = g
+            call debug_error_condition(filter%process_noise_g <= 0.0_dp, 'process_noise_g must be >= 0.0')
+        end if
         if (present(max_vel)) filter%maximum_velocity = max_vel
+        if (present(def_vel)) then
+            default_velocity = def_vel
+        else
+            default_velocity = 0.0_dp
+        end if
+        call debug_error_condition(vmag(default_velocity) > filter%maximum_velocity, &
+                                   'magnitude of default_velocity must be <= maximum_velocity')
         if (present(max_acc)) filter%maximum_acceleration = max_acc
-        call debug_error_condition(vmag(filter%default_velocity) > filter%maximum_velocity, &
-                                   'invalid velocity initialization, magnitude of default > maximum ILLEGAL')
-        call debug_error_condition(vmag(filter%default_acceleration) > filter%maximum_acceleration, &
-                                   'invalid acceleration initialization, magnitude of default > maximum ILLEGAL')
+        if (present(def_acc)) then
+            default_acceleration = def_acc
+        else
+            default_acceleration = 0.0_dp
+        end if
+        call debug_error_condition(vmag(default_acceleration) > filter%maximum_acceleration, &
+                                   'magnitude of default_acceleration must be <= maximum_acceleration')
+        if (present(k)) then
+            ut_kappa = k
+        else
+            ut_kappa = 0.0_dp ! alternate, 3.0_dp - real(size(filter%state_estimate), kind=dp)
+        end if
+        if (present(a)) then
+            ut_alpha = a
+        else
+            ut_alpha = 1.0_dp ! alternate, 1.0_dp
+        end if
+        if (present(b)) then
+            ut_beta = b
+        else
+            ut_beta = 2.0_dp ! 2.0_dp is ideal for Gaussian distribution
+        end if
+        if (present(def_rng)) then
+            default_range = def_rng
+        else
+            default_range = 500.0_dp*nmi2ft_dp
+        end if
+        trk_n = size(filter%state_estimate, kind=dp)
+        ut_lambda = ut_alpha**2 * (trk_n + ut_kappa) - trk_n
+        filter%wx_1 = ut_lambda/(trk_n + ut_lambda)
+        filter%wc_1 = filter%wx_1 + 1.0_dp - ut_alpha**2 + ut_beta
+        filter%w_2_2n1 = 0.5_dp/(trk_n + ut_lambda)
+        filter%ut_gamma = sqrt(trk_n + ut_lambda)
         !! initialize track estimate based on observer state and measurement
         cos_ang = cos(meas(2))
         sin_ang = sin(meas(2))
         if (meas_sig(1) > 0.0_dp) then !! measurement contains range information
             rng_use = meas(1)
         else
-            rng_use = filter%default_range
+            rng_use = default_range
         end if
         filter%state_estimate(1) = obs(1) + rng_use*cos_ang
         filter%state_estimate(2) = obs(2) + rng_use*sin_ang
@@ -87,7 +115,7 @@ contains
             filter%state_estimate(3) = obs(3) - v_t*sin_ang
             filter%state_estimate(4) = obs(4) + v_t*cos_ang 
         else !! measurement contains NO velocity information
-            filter%state_estimate(3:4) = filter%default_velocity
+            filter%state_estimate(3:4) = default_velocity
         end if
         !! make sure state_estimate does not violate maximum_velocity constraint
         trk_spd = sqrt(filter%state_estimate(3)**2 + filter%state_estimate(4)**2)
@@ -114,7 +142,7 @@ contains
             end if
         end if
         !! assume no acceleration
-        filter%state_estimate(5:6) = filter%default_acceleration
+        filter%state_estimate(5:6) = default_acceleration
         !! initialize covariance as J * R * transpose(J), where J is the Jacobian of the state space and R is the measurement covariance
         call generate_jrjt(obs, filter%state_estimate, meas_sig, jrjt)
         if (meas_sig(1) < 0.0_dp) then
@@ -204,33 +232,24 @@ contains
     pure subroutine filter_time_update(filter, t)
         type(sr_ukf_type), intent(inout) :: filter
         real(dp), intent(in) :: t
-        real(dp) :: dt, sigma_points(size(filter%state_estimate),2*size(filter%state_estimate)+1), &
-                    wm(2*size(filter%state_estimate)+1), wc(2*size(filter%state_estimate)+1)
+        real(dp) :: dt, sigma_points(size(filter%state_estimate),2*size(filter%state_estimate)+1)
         call debug_error_condition(filter%state_estimate_time < 0.0_dp, 'filter is not initialized')
         dt = t - filter%state_estimate_time
         call debug_error_condition(dt < 0.0_dp, 'negative dt time update not implemented')
         filter%state_estimate_time = t
         if (nearly(dt, 0.0_dp)) return !! return early if dt is approximately 0.0
-        call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_lambda, filter%ut_alpha, &
-                                   filter%ut_beta, sigma_points, wm, wc)
+        call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
     end
 
-    pure subroutine generate_sigma_points(state, sqrt_cov, lambda, alpha, beta, sigma_points, wm, wc)
-        real(dp), intent(in) :: state(6), sqrt_cov(6,6), lambda, alpha, beta
-        real(dp), intent(out) :: sigma_points(size(state),2*size(state)+1), wm(2*size(state)+1), wc(2*size(state)+1)
+    pure subroutine generate_sigma_points(state, sqrt_cov, ut_gamma, sigma_points)
+        real(dp), intent(in) :: state(6), sqrt_cov(6,6), ut_gamma
+        real(dp), intent(out) :: sigma_points(size(state),2*size(state)+1)
         integer :: trk_n, i
-        real(dp) :: trk_n_dp, y
         trk_n = size(state)
-        trk_n_dp = real(trk_n, kind=dp)
-        wm(1) = lambda/(trk_n_dp + lambda)
-        wm(2:2*trk_n+1) = 0.5_dp/(trk_n_dp + lambda)
-        wc(1) = wm(1) + 1.0_dp - alpha**2 + beta
-        wc(2:2*trk_n+1) = wm(2:2*trk_n+1)
-        y = sqrt(trk_n_dp + lambda)
         sigma_points(:,1) = state
         do i=1,trk_n
-            sigma_points(:,i+1) = state + y*sqrt_cov(:,i)
-            sigma_points(:,i+1+trk_n) = state - y*sqrt_cov(:,i)
+            sigma_points(:,i+1) = state + ut_gamma*sqrt_cov(:,i)
+            sigma_points(:,i+1+trk_n) = state - ut_gamma*sqrt_cov(:,i)
         end do
     end
 
