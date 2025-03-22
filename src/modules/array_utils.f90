@@ -31,6 +31,7 @@ private
         module procedure :: broadcast_sub_i64
         module procedure :: broadcast_sub_sp
         module procedure :: broadcast_sub_dp
+        module procedure :: broadcast_sub_inplace_dp
     end interface broadcast_sub
 
     interface broadcast_mul
@@ -207,6 +208,15 @@ contains
             vals(:,i) = arr(:,i) - x_spread
         end do
     end subroutine broadcast_sub_dp
+
+    pure subroutine broadcast_sub_inplace_dp(arr, x_spread)
+        real(kind=dp), intent(inout) :: arr(:,:)
+        real(kind=dp), intent(in) :: x_spread(size(arr, dim=1, kind=i64))
+        integer(kind=i64) :: i
+        do concurrent (i=1_i64:size(arr, dim=2, kind=i64))
+            arr(:,i) = arr(:,i) - x_spread
+        end do
+    end subroutine broadcast_sub_inplace_dp
 
     pure subroutine broadcast_mul_i32(arr, x_spread, vals)
         integer(kind=i32), intent(in) :: arr(:,:), x_spread(size(arr, dim=1, kind=i64))
