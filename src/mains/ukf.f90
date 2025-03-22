@@ -1,6 +1,6 @@
 module ukf
 use, non_intrinsic :: kinds, only: dp
-use, non_intrinsic :: constants, only: nmi2ft_dp
+use, non_intrinsic :: constants, only: nmi2ft_dp, deg2rad_dp
 use, non_intrinsic :: system, only: debug_error_condition, nearly
 use, non_intrinsic :: vector_math, only: vmag
 use, non_intrinsic :: matrix_math, only: chol, qr
@@ -33,13 +33,13 @@ private
         pure subroutine dynamics_model(state, dt, opt_data)
         import dp
         implicit none
-            real(dp), intent(inout) :: state(:)
+            real(dp), intent(inout) :: state(6)
             real(dp), intent(in) :: dt
             real(dp), intent(in), optional :: opt_data(:)
         end
     end interface
 
-    public :: sr_ukf_type, initialize_sr_ukf, filter_time_update, dynamics_ballistic
+    public :: dp, nmi2ft_dp, deg2rad_dp, g, sr_ukf_type, cart2pol, initialize_sr_ukf, filter_time_update, dynamics_ballistic
 
 contains
 
@@ -242,20 +242,25 @@ contains
         end if
     end
 
-    pure subroutine filter_time_update(filter, t, state_dynamics_model)
+    impure subroutine filter_time_update(filter, t, state_dynamics_model)
         type(sr_ukf_type), intent(inout) :: filter
         real(dp), intent(in) :: t
         procedure(dynamics_model) :: state_dynamics_model
         real(dp) :: dt, sigma_points(size(filter%state_estimate),2*size(filter%state_estimate)+1), &
                     amat(size(filter%state_estimate),3*size(filter%state_estimate)+1), sqrt_wc, &
                     unused_tau(min(size(sigma_points,dim=1),size(sigma_points,dim=2))), &
-                    amat_t(size(amat,dim=2),size(amat,dim=1))
+                    amat_t(size(amat,dim=2),size(amat,dim=1)), p(6,6)
         integer :: i
         call debug_error_condition(filter%state_estimate_time < 0.0_dp, 'filter is not initialized')
         dt = t - filter%state_estimate_time
         call debug_error_condition(dt < 0.0_dp, 'negative dt time update not implemented')
         filter%state_estimate_time = t
         if (nearly(dt, 0.0_dp)) return !! return early if dt is approximately 0.0
+        write(*,*) 'original covariance'
+        p = matmul(filter%covariance_square_root, transpose(filter%covariance_square_root))
+        do i=1,6
+            write(*,'(*(e13.6," "))') p(i,:)
+        end do
         !! generate sigma points
         call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
         !! propagate sigma points through system dynamics
@@ -277,19 +282,36 @@ contains
             amat(:,i) = sqrt_wc*sigma_points(:,i)
         end do
         call generate_sqrt_process_noise(filter%process_noise, dt, amat(:,size(sigma_points,dim=2)+1:size(amat,dim=2)))
+        write(*,*) 'square root process noise Q'
+        do i=1,6
+            write(*,'(*(e13.6," "))') amat(i,size(sigma_points,dim=2)+1:size(amat,dim=2))
+        end do
         !! calculate new covariance_square_root
         amat_t = transpose(amat)
         call qr(amat_t, unused_tau)
+        write(*,*) 'amat_t after QR decomposition, upper 6x6 should hold R'
+        do i=1,6
+            write(*,'(*(e13.6," "))') amat_t(i,:)
+        end do
         call extract_rt(amat_t(1:6,1:6), filter%covariance_square_root)
+        write(*,*) 'transpose(R) is new filter%covariance_square_root'
+        do i=1,6
+            write(*,'(*(e13.6," "))') filter%covariance_square_root(i,:)
+        end do
+        write(*,*) 'updated covariance'
+        p = matmul(filter%covariance_square_root, transpose(filter%covariance_square_root))
+        do i=1,6
+            write(*,'(*(e13.6," "))') p(i,:)
+        end do
     end
 
-    pure subroutine extract_rt(r_upper_triangle, rt)
-        real(dp), intent(in) :: r_upper_triangle(6,6)
-        real(dp), intent(out) :: rt(6,6)
+    pure subroutine extract_rt(r, r_upper_triangle_transpose)
+        real(dp), intent(in) :: r(6,6)
+        real(dp), intent(out) :: r_upper_triangle_transpose(6,6)
         integer :: i
-        rt = 0.0_dp
+        r_upper_triangle_transpose = 0.0_dp
         do concurrent (i=1:6)
-            rt(i:6,i) = r_upper_triangle(i,i:6)
+            r_upper_triangle_transpose(i:6,i) = r(i,i:6)
         end do
     end
 
@@ -371,4 +393,19 @@ end module ukf
 program ex_ukf
 use, non_intrinsic :: ukf
 implicit none
+
+    type(sr_ukf_type) :: filter
+    real(dp) :: obs(6), tgt(6), meas(4), meas_sig(4)
+
+    obs = 0.0_dp
+    tgt = [200.0_dp*nmi2ft_dp, 200000.0_dp, &
+           -3000.0_dp*cos(45.0_dp*deg2rad_dp), 3000.0_dp*sin(45.0_dp*deg2rad_dp), &
+           0.0_dp, -1.0_dp*g]
+
+    call cart2pol(obs, tgt, meas)
+    meas_sig = [100.0_dp, 0.1_dp*deg2rad_dp, 10.0_dp, 0.01_dp*deg2rad_dp]
+    call initialize_sr_ukf(obs, meas, meas_sig, filter)
+
+    call filter_time_update(filter, 1.0_dp, dynamics_ballistic)
+
 end program ex_ukf
