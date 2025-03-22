@@ -101,7 +101,7 @@ contains
         trk_n = size(filter%state_estimate, kind=dp)
         ut_lambda = ut_alpha**2 * (trk_n + ut_kappa) - trk_n
         filter%wx_1 = ut_lambda/(trk_n + ut_lambda)
-        filter%wc_1 = sqrt(filter%wx_1 + 1.0_dp - ut_alpha**2 + ut_beta) !! wc_1 is only ever used with a square root applied, so do that once here
+        filter%wc_1 = sqrt(abs(filter%wx_1 + 1.0_dp - ut_alpha**2 + ut_beta)) !! wc_1 is only ever used with a square root applied, so do that once here
         filter%w_2_2n1 = 0.5_dp/(trk_n + ut_lambda)
         filter%ut_gamma = sqrt(trk_n + ut_lambda)
         !! initialize track estimate based on observer state and measurement
@@ -287,7 +287,7 @@ contains
         integer :: i
         rt = 0.0_dp
         do concurrent (i=1:6)
-            rt(i:6,i) = r_upper_triangle(i,1:i)
+            rt(i:6,i) = r_upper_triangle(i,i:6)
         end do
     end
 

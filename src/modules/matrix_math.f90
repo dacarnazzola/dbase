@@ -101,7 +101,7 @@ contains
                 tau(i) = 0.0_dp
                 cycle
             end if
-            alpha = -1.0_dp*sign(1.0_dp, x(1_i64))*s
+            alpha = -1.0_dp*sign(s, x(1_i64))
             x(1_i64) = x(1_i64) - alpha
             unorm2 = vdot(x(1_i64:x_dim), x(1_i64:x_dim))
             if (nearly(unorm2, 0.0_dp)) then
