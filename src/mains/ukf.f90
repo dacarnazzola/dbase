@@ -3,7 +3,7 @@ use, non_intrinsic :: kinds, only: dp
 use, non_intrinsic :: constants, only: nmi2ft_dp
 use, non_intrinsic :: system, only: debug_error_condition, nearly
 use, non_intrinsic :: vector_math, only: vmag
-use, non_intrinsic :: matrix_math, only: chol
+use, non_intrinsic :: matrix_math, only: chol, qr
 use, non_intrinsic :: array_utils, only: broadcast_sub
 implicit none
 private
@@ -14,8 +14,8 @@ private
     type :: sr_ukf_type
         !! an uninitialized sr_ukf_type will have negative negative time, default initialization will set this to 0.0
         real(dp) :: state_estimate_time = -1.0_dp
-        !! model process noise should handle maneuvers up to process_noise_g g's (3.0 = 3 g's)
-        real(dp) :: process_noise_g = 3.0_dp
+        !! model process noise should handle maneuvers up to process_noise ft/sec**3
+        real(dp) :: process_noise = 3.0_dp*g
         !! state_estimate maximum values
         real(dp) :: maximum_velocity = 10000.0_dp
         real(dp) :: maximum_acceleration = 9.0_dp*g
@@ -43,10 +43,10 @@ private
 
 contains
 
-    pure subroutine initialize_sr_ukf(obs, meas, meas_sig, filter, t, g, max_vel, def_vel, max_acc, def_acc, k, a, b, def_rng)
+    pure subroutine initialize_sr_ukf(obs, meas, meas_sig, filter, t, noise, max_vel, def_vel, max_acc, def_acc, k, a, b, def_rng)
         real(dp), intent(in) :: obs(6), meas(4), meas_sig(4)
         type(sr_ukf_type), intent(out) :: filter
-        real(dp), intent(in), optional :: t, g, max_vel, max_acc, k, a, b, def_rng, def_vel(2), def_acc(2)
+        real(dp), intent(in), optional :: t, noise, max_vel, max_acc, k, a, b, def_rng, def_vel(2), def_acc(2)
         real(dp) :: trk_n, rng_use, cos_ang, sin_ang, v_t, trk_spd, jrjt(6,6), dim_var, ut_kappa, ut_alpha, ut_beta, ut_lambda, &
                     default_range, default_velocity(2), default_acceleration(2)
         call debug_error_condition(meas_sig(2) <= 0.0_dp, &
@@ -58,9 +58,9 @@ contains
         else
             filter%state_estimate_time = 0.0_dp
         end if
-        if (present(g)) then
-            filter%process_noise_g = g
-            call debug_error_condition(filter%process_noise_g <= 0.0_dp, 'process_noise_g must be >= 0.0')
+        if (present(noise)) then
+            filter%process_noise = noise
+            call debug_error_condition(filter%process_noise <= 0.0_dp, 'process_noise must be >= 0.0')
         end if
         if (present(max_vel)) filter%maximum_velocity = max_vel
         if (present(def_vel)) then
@@ -269,10 +269,13 @@ contains
         !! form A matrix (amat) as [sqrt(w)*centered_sigma_points, sqrt(Q)]
         amat(:,1) = filter%wc_1*sigma_points(:,1)
         sqrt_wc = sqrt(filter%w_2_2n1)
-        do concurrent (i=2:size(sigma_points(:,2)))
+        do concurrent (i=2:size(sigma_points,dim=2))
             amat(:,i) = sqrt_wc*sigma_points(:,i)
         end do
-        call generate_sqrt_process_noise(filter%process_noise_g, dt, amat(:,size(sigma_points,dim=2)+1:size(amat,dim=2)))
+        call generate_sqrt_process_noise(filter%process_noise, dt, amat(:,size(sigma_points,dim=2)+1:size(amat,dim=2)))
+        !! calculate new covariance_square_root
+        call qr(transpose(amat), filter%covariance_square_root)
+        filter%covariance_square_root = transpose(filter%covariance_square_root)
     end
 
     pure subroutine generate_sigma_points(state, sqrt_cov, ut_gamma, sigma_points)
@@ -306,8 +309,8 @@ contains
         state(1:2) = state(1:2) + dt*state(3:4)
     end
 
-    pure subroutine generate_sqrt_process_noise(noise_g, dt, sqrt_q)
-        real(dp), intent(in) :: noise_g, dt
+    pure subroutine generate_sqrt_process_noise(noise, dt, sqrt_q)
+        real(dp), intent(in) :: noise, dt
         real(dp), intent(out) :: sqrt_q(:,:)
         real(dp) :: qmat(6,6), dt2, dt3, dt4, dt5, g2, g3, g6, g8, g20
         call debug_error_condition((size(sqrt_q, dim=1) /= 6) .or. (size(sqrt_q, dim=2) /= 6), &
@@ -317,11 +320,11 @@ contains
         dt3 = dt**3
         dt4 = dt**4
         dt5 = dt**5
-        g2 = noise_g/2.0_dp
-        g3 = noise_g/3.0_dp
-        g6 = noise_g/6.0_dp
-        g8 = noise_g/8.0_dp
-        g20 = noise_g/20.0_dp
+        g2 = noise/2.0_dp
+        g3 = noise/3.0_dp
+        g6 = noise/6.0_dp
+        g8 = noise/8.0_dp
+        g20 = noise/20.0_dp
         !! initialize all of Q to 0.0
         qmat = 0.0_dp
         !! fill in Q matrix column by column
@@ -339,7 +342,7 @@ contains
         qmat(6,4) = qmat(5,3)
         qmat(1,5) = g6*dt3
         qmat(3,5) = g2*dt2
-        qmat(5,5) = noise_g*dt
+        qmat(5,5) = noise*dt
         qmat(2,6) = qmat(1,5)
         qmat(4,6) = qmat(3,5)
         qmat(6,6) = qmat(5,5)

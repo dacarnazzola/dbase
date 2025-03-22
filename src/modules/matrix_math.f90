@@ -10,7 +10,10 @@ private
         module procedure :: chol_dp
     end interface chol
 
-    public :: chol
+    interface qr
+    end interface qr
+
+    public :: chol, qr
 
 contains
 
@@ -79,5 +82,11 @@ contains
             end if
         end do
     end subroutine chol_dp
+
+    pure subroutine qr(A, tau)
+        real(kind=dp), intent(inout) :: A(:,:)
+        real(kind=dp), intent(out) :: tau(min(size(A, dim=1, kind=i64), size(A, dim=2, kind=i64)))
+        real(kind=dp) :: x(size(A, dim=1, kind=i64)), s, alpha, u(size(A, dim=1, kind=i64))
+    end subroutine qr
 
 end module matrix_math
