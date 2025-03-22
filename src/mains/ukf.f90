@@ -222,12 +222,12 @@ contains
         real(dp) :: trk_n_dp, y
         trk_n = size(state)
         trk_n_dp = real(trk_n, kind=dp)
+        wm(1) = lambda/(trk_n_dp + lambda)
+        wm(2:2*trk_n+1) = 0.5_dp/(trk_n_dp + lambda)
+        wc(1) = wm(1) + 1.0_dp - alpha**2 + beta
+        wc(2:2*trk_n+1) = wm(2:2*trk_n+1)
         y = sqrt(trk_n_dp + lambda)
         sigma_points(:,1) = state
-        wm = lambda/(2.0_dp*(trk_n_dp + lambda))
-        wm(1) = 2.0_dp*wm(1)
-        wc = wm
-        wc(1) = wc(1) + (1.0_dp - alpha**2 + beta)
         do i=1,trk_n
             sigma_points(:,i+1) = state + y*sqrt_cov(:,i)
             sigma_points(:,i+1+trk_n) = state - y*sqrt_cov(:,i)
