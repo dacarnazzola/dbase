@@ -1,7 +1,8 @@
 module matrix_math
 use, non_intrinsic :: kinds, only: i64, sp, dp, c_bool
 use, non_intrinsic :: constants, only: eps_sp, eps_dp
-use, non_intrinsic :: system, only: debug_error_condition
+use, non_intrinsic :: system, only: debug_error_condition, nearly
+use, non_intrinsic :: vector_math, only: vmag, vdot
 implicit none
 private
 
@@ -11,6 +12,7 @@ private
     end interface chol
 
     interface qr
+        module procedure :: qr_dp
     end interface qr
 
     public :: chol, qr
@@ -83,10 +85,38 @@ contains
         end do
     end subroutine chol_dp
 
-    pure subroutine qr(A, tau)
+    pure subroutine qr_dp(A, tau)
         real(kind=dp), intent(inout) :: A(:,:)
         real(kind=dp), intent(out) :: tau(min(size(A, dim=1, kind=i64), size(A, dim=2, kind=i64)))
-        real(kind=dp) :: x(size(A, dim=1, kind=i64)), s, alpha, u(size(A, dim=1, kind=i64))
-    end subroutine qr
+        real(kind=dp) :: x(size(A, dim=1, kind=i64)), s, alpha, p(size(A, dim=1, kind=i64)), unorm2
+        integer(kind=i64) :: m, n, imax, i, x_dim, p_dim
+        m = size(A, dim=1, kind=i64)
+        n = size(A, dim=2, kind=i64)
+        imax = min(m - 1_i64, n)
+        do i=1,imax
+            x_dim = m - i + 1_i64
+            x(1_i64:x_dim) = A(i:m,i)
+            s = vmag(x(1_i64:x_dim))
+            if (nearly(s, 0.0_dp)) then
+                tau(i) = 0.0_dp
+                cycle
+            end if
+            alpha = -1.0_dp*sign(1.0_dp, x(1_i64))*s
+            x(1_i64) = x(1_i64) - alpha
+            unorm2 = vdot(x(1_i64:x_dim), x(1_i64:x_dim))
+            if (nearly(unorm2, 0.0_dp)) then
+                tau(i) = 0.0_dp
+                cycle
+            end if
+            tau(i) = 2.0_dp*x(1_i64)**2/unorm2
+            x(1_i64:x_dim) = x(1_i64:x_dim)/x(1_i64)
+            p_dim = n - i + 1_i64
+            p(1_i64:p_dim) = reshape(matmul(reshape(x(1_i64:x_dim), shape=[1_i64, x_dim]), A(i:m,i:n)), shape=[p_dim])
+            A(i:m,i:n) = A(i:m,i:n) - tau(i)*spread(x(1_i64:x_dim), dim=2, ncopies=p_dim) * &
+                                             spread(p(1_i64:p_dim), dim=1, ncopies=x_dim)
+            A(i+1_i64:m,i) = x(2_i64:m-i+1_i64)
+        end do
+        if (m <= n) tau(m) = 0.0_dp
+    end subroutine qr_dp
 
 end module matrix_math

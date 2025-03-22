@@ -245,7 +245,9 @@ contains
         real(dp), intent(in) :: t
         procedure(dynamics_model) :: state_dynamics_model
         real(dp) :: dt, sigma_points(size(filter%state_estimate),2*size(filter%state_estimate)+1), &
-                    amat(size(filter%state_estimate),3*size(filter%state_estimate)+1), sqrt_wc
+                    amat(size(filter%state_estimate),3*size(filter%state_estimate)+1), sqrt_wc, &
+                    unused_tau(min(size(sigma_points,dim=1),size(sigma_points,dim=2))), &
+                    amat_t(size(amat,dim=2),size(amat,dim=1))
         integer :: i
         call debug_error_condition(filter%state_estimate_time < 0.0_dp, 'filter is not initialized')
         dt = t - filter%state_estimate_time
@@ -274,8 +276,19 @@ contains
         end do
         call generate_sqrt_process_noise(filter%process_noise, dt, amat(:,size(sigma_points,dim=2)+1:size(amat,dim=2)))
         !! calculate new covariance_square_root
-        call qr(transpose(amat), filter%covariance_square_root)
-        filter%covariance_square_root = transpose(filter%covariance_square_root)
+        amat_t = transpose(amat)
+        call qr(amat_t, unused_tau)
+        call extract_rt(amat_t(1:6,1:6), filter%covariance_square_root)
+    end
+
+    pure subroutine extract_rt(r_upper_triangle, rt)
+        real(dp), intent(in) :: r_upper_triangle(6,6)
+        real(dp), intent(out) :: rt(6,6)
+        integer :: i
+        rt = 0.0_dp
+        do concurrent (i=1:6)
+            rt(i:6,i) = r_upper_triangle(i,1:i)
+        end do
     end
 
     pure subroutine generate_sigma_points(state, sqrt_cov, ut_gamma, sigma_points)
