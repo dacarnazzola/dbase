@@ -29,7 +29,7 @@ private
     end type sr_ukf_type
 
     interface
-        pure subroutine model_dynamics(state, dt, opt_data)
+        pure subroutine dynamics_model(state, dt, opt_data)
         import dp
         implicit none
             real(dp), intent(inout) :: state(:)
@@ -239,10 +239,10 @@ contains
         end if
     end
 
-    pure subroutine filter_time_update(filter, t, state_model_dynamics)
+    pure subroutine filter_time_update(filter, t, state_dynamics_model)
         type(sr_ukf_type), intent(inout) :: filter
         real(dp), intent(in) :: t
-        procedure(model_dynamics) :: state_model_dynamics
+        procedure(dynamics_model) :: state_dynamics_model
         real(dp) :: dt, sigma_points(size(filter%state_estimate),2*size(filter%state_estimate)+1)
         integer :: i
         call debug_error_condition(filter%state_estimate_time < 0.0_dp, 'filter is not initialized')
@@ -252,7 +252,12 @@ contains
         if (nearly(dt, 0.0_dp)) return !! return early if dt is approximately 0.0
         call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
         do concurrent (i=1:size(sigma_points,dim=2))
-            call state_model_dynamics(sigma_points(:,i), dt, [filter%maximum_velocity])
+            call state_dynamics_model(sigma_points(:,i), dt, [filter%maximum_velocity])
+        end do
+        filter%state_estimate = filter%wx_1*sigma_points(:,1)
+        do i=1,size(sigma_points,dim=1)
+            filter%state_estimate = filter%state_estimate + filter%w_2_2n1*(sigma_points(:,i+1) + &
+                                                                            sigma_points(:,i+1+size(sigma_points,dim=1)))
         end do
     end
 
