@@ -105,7 +105,7 @@ contains
         filter%wx_1 = ut_lambda/(trk_n + ut_lambda)
         filter%wc_1 = filter%wx_1 + 1.0_dp - ut_alpha**2 + ut_beta
         call debug_error_condition(filter%wc_1 < 0.0_dp, 'negative weights for covariance matrix not implemented')
-        filter%wc_1 = sqrt(filter%wc_1) !! wc_1 only ever used under square root, requiring the check above - compute once here
+        filter%wc_1 = sqrt(filter%wc_1) !! wc_1 primarily used under square root, so compute that here (cross correlation will square this term)
         filter%w_2_2n1 = 0.5_dp/(trk_n + ut_lambda)
         filter%ut_gamma = sqrt(trk_n + ut_lambda)
         !! initialize track estimate based on observer state and measurement
@@ -313,7 +313,6 @@ contains
         call extract_rt(amat_t(1:meas_dim,1:meas_dim), square_root_measurement_covariance)
         !! calculate cross correlation
         cross_correlation = 0.0_dp
-        !! Wc(1) supposed to be under a square root here? I had been storing filter%wc_1 as already the square root term
         cross_correlation(:,1:meas_dim) = filter%wc_1**2*matmul(sigma_points(:,1:1), &
                                                                 transpose(sigma_points_meas(meas_ii(1:meas_dim),1:1)))
         do i=2,13
