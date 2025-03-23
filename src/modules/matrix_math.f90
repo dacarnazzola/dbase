@@ -12,7 +12,7 @@ private
     end interface chol
 
     interface qr
-        module procedure :: qr_dp
+        module procedure :: qr_opt_tau_dp
     end interface qr
 
     public :: chol, qr
@@ -85,10 +85,11 @@ contains
         end do
     end subroutine chol_dp
 
-    pure subroutine qr_dp(A, tau)
+    pure subroutine qr_opt_tau_dp(A, opt_tau)
         real(kind=dp), intent(inout) :: A(:,:)
-        real(kind=dp), intent(out) :: tau(min(size(A, dim=1, kind=i64), size(A, dim=2, kind=i64)))
-        real(kind=dp) :: x(size(A, dim=1, kind=i64)), s, alpha, p(size(A, dim=1, kind=i64)), unorm2
+        real(kind=dp), intent(out), optional :: opt_tau(min(size(A, dim=1, kind=i64), size(A, dim=2, kind=i64)))
+        real(kind=dp) :: x(size(A, dim=1, kind=i64)), s, alpha, p(size(A, dim=1, kind=i64)), unorm2, &
+                         tau(min(size(A, dim=1, kind=i64), size(A, dim=2, kind=i64)))
         integer(kind=i64) :: m, n, imax, i, x_dim, p_dim
         m = size(A, dim=1, kind=i64)
         n = size(A, dim=2, kind=i64)
@@ -117,6 +118,7 @@ contains
             A(i+1_i64:m,i) = x(2_i64:m-i+1_i64)
         end do
         if (m <= n) tau(m) = 0.0_dp
-    end subroutine qr_dp
+        if (present(opt_tau)) opt_tau = tau
+    end subroutine qr_opt_tau_dp
 
 end module matrix_math

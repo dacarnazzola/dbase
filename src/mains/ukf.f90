@@ -40,7 +40,8 @@ private
         end
     end interface
 
-    public :: dp, nmi2ft_dp, deg2rad_dp, g, sr_ukf_type, initialize_sr_ukf, dynamics_ballistic, filter_measurement_update
+    public :: dp, nmi2ft_dp, deg2rad_dp, g, sr_ukf_type, initialize_sr_ukf, dynamics_ballistic, filter_measurement_update, &
+              generate_observation
 
 contains
 
@@ -248,8 +249,9 @@ contains
         type(sr_ukf_type), intent(inout) :: filter
         real(dp), intent(in) :: t
         procedure(dynamics_model) :: state_dynamics_model
-        real(dp) :: sigma_points(6,13), sigma_points_meas(4,13), pred_meas(4)
-        integer :: i, meas_dim, meas_ii(4)
+        real(dp) :: sigma_points(6,13), sigma_points_meas(4,13), pred_meas(4), innovation(4), amat(4,19), amat_t(19,4), sqrt_wc, &
+                    square_root_measurement_covariance(4,4), cross_correlation(6,4)
+        integer :: i, meas_dim, meas_ii(4), meas_index
         !! update filter to current time
         call filter_time_update(filter, t, state_dynamics_model)
         !! return early if measurement provides no information
@@ -272,19 +274,60 @@ contains
         do concurrent (i=1:13)
             call cart2pol(obs, sigma_points(:,i), sigma_points_meas(:,i))
         end do
+        !! center original state estimate dimension sigma_points for use later
+        call broadcast_sub(sigma_points, filter%state_estimate)
         !! calculate sigma point weighted average predicted measurement
         pred_meas = filter%wx_1*sigma_points_meas(:,1)
         do i=1,6
             pred_meas = pred_meas + filter%w_2_2n1*(sigma_points_meas(:,i+1) + sigma_points_meas(:,i+7))
         end do
         !! calculate innovation
+        innovation = 0.0_dp
+        do concurrent (i=1:meas_dim)
+            meas_index = meas_ii(i)
+            if (meas_index == 2) then !! meas_dim(meas_ii(i)) is ANGLE, need to properly wrap -pi/+pi
+                innovation(meas_index) = atan2(sin(meas(meas_index) - pred_meas(meas_index)), &
+                                               cos(meas(meas_index) - pred_meas(meas_index)))
+            else
+                innovation(meas_index) = meas(meas_index) - pred_meas(meas_index)
+            end if
+        end do
+        !! center measurement space sigma points
+        do concurrent (i=1:13)
+            sigma_points_meas(:,i) = sigma_points_meas(:,i) - pred_meas
+            if (meas_sig(2) > 0.0_dp) sigma_points_meas(2,i) = atan2(sin(sigma_points_meas(2,i)), cos(sigma_points_meas(2,i)))
+        end do
+        !! form amat as [sqrt(w)*centered_measurement_sigma_points, sqrt(R)] where R is measurement covariance (independent)
+        amat = 0.0_dp
+        amat(1:meas_dim,1) = filter%wc_1*sigma_points_meas(meas_ii(1:meas_dim),1)
+        sqrt_wc = sqrt(filter%w_2_2n1)
+        do concurrent (i=2:13)
+            amat(1:meas_dim,i) = sqrt_wc*sigma_points_meas(meas_ii(1:meas_dim),i)
+        end do
+        do concurrent (i=1:meas_dim)
+            amat(i,13+i) = meas_sig(meas_ii(i))
+        end do
+        !! calculate square root of measurement covariance
+        amat_t = transpose(amat)
+        call qr(amat_t(1:13+meas_dim,1:meas_dim))
+        call extract_rt(amat_t(1:meas_dim,1:meas_dim), square_root_measurement_covariance)
+        !! calculate cross correlation
+        cross_correlation = 0.0_dp
+        !! Wc(1) supposed to be under a square root here? I had been storing filter%wc_1 as already the square root term
+        cross_correlation(:,1:meas_dim) = filter%wc_1**2*matmul(sigma_points(:,1:1), &
+                                                                transpose(sigma_points_meas(meas_ii(1:meas_dim),1:1)))
+        do i=2,13
+            cross_correlation(:,1:meas_dim) = cross_correlation(:,1:meas_dim) + &
+                                              filter%w_2_2n1*matmul(sigma_points(:,i:i), &
+                                                                    transpose(sigma_points_meas(meas_ii(1:meas_dim),i:i)))
+        end do
     end
 
     pure subroutine filter_time_update(filter, t, state_dynamics_model)
         type(sr_ukf_type), intent(inout) :: filter
         real(dp), intent(in) :: t
         procedure(dynamics_model) :: state_dynamics_model
-        real(dp) :: dt, sigma_points(6,13), amat(6,19), sqrt_wc, unused_tau(6), amat_t(19,6), r(6,6)
+        real(dp) :: dt, sigma_points(6,13), amat(6,19), sqrt_wc, amat_t(19,6), r(6,6)
         integer :: i
         call debug_error_condition(filter%state_estimate_time < 0.0_dp, 'filter is not initialized')
         dt = t - filter%state_estimate_time
@@ -313,18 +356,20 @@ contains
         call generate_sqrt_process_noise(filter%process_noise, dt, amat(:,14:19))
         !! calculate new covariance_square_root
         amat_t = transpose(amat)
-        call qr(amat_t, unused_tau)
+        call qr(amat_t)
         r = amat_t(1:6,1:6)
         call extract_rt(r, filter%covariance_square_root)
     end
 
     pure subroutine extract_rt(r, r_upper_triangle_transpose)
-        real(dp), intent(in) :: r(6,6)
-        real(dp), intent(out) :: r_upper_triangle_transpose(6,6)
-        integer :: i
+        real(dp), intent(in) :: r(:,:)
+        real(dp), intent(out) :: r_upper_triangle_transpose(size(r,dim=1),size(r,dim=2))
+        integer :: n, i
+        call debug_error_condition(size(r,dim=1) /= size(r,dim=2), 'R matrix must be square')
+        n = size(r, dim=1)
         r_upper_triangle_transpose = 0.0_dp
-        do concurrent (i=1:6)
-            r_upper_triangle_transpose(i:6,i) = r(i,i:6)
+        do concurrent (i=1:n)
+            r_upper_triangle_transpose(i:n,i) = r(i,i:n)
         end do
     end
 
