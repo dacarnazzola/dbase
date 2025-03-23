@@ -337,6 +337,8 @@ contains
                                        x=k_t(1:meas_dim,i))                      !! columns of transpose(Kalman gain) --> rows of Kalman gain
         end do
         kalman_gain(:,1:meas_dim) = transpose(k_t(1:meas_dim,:))
+        !! update filter%state_estimate
+        filter%state_estimate = filter%state_estimate + matmul(kalman_gain(:,1:meas_dim), innovation(meas_ii(1:meas_dim)))
     end
 
     pure subroutine filter_time_update(filter, t, state_dynamics_model)
