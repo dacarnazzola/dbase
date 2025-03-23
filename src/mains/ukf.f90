@@ -3,7 +3,7 @@ use, non_intrinsic :: kinds, only: dp
 use, non_intrinsic :: constants, only: nmi2ft_dp, deg2rad_dp
 use, non_intrinsic :: system, only: debug_error_condition, nearly
 use, non_intrinsic :: vector_math, only: vmag
-use, non_intrinsic :: matrix_math, only: chol, qr
+use, non_intrinsic :: matrix_math, only: chol, qr, forward_substitution, backward_substitution
 use, non_intrinsic :: array_utils, only: broadcast_sub
 use, non_intrinsic :: random, only: random_normal
 implicit none
@@ -250,7 +250,8 @@ contains
         real(dp), intent(in) :: t
         procedure(dynamics_model) :: state_dynamics_model
         real(dp) :: sigma_points(6,13), sigma_points_meas(4,13), pred_meas(4), innovation(4), amat(4,19), amat_t(19,4), sqrt_wc, &
-                    square_root_measurement_covariance(4,4), cross_correlation(6,4)
+                    square_root_measurement_covariance(4,4), cross_correlation(6,4), p_xz_transpose(4,6), temp(4,6), &
+                    s_z_transpose(4,4), k_t(4,6), kalman_gain(6,4)
         integer :: i, meas_dim, meas_ii(4), meas_index
         !! update filter to current time
         call filter_time_update(filter, t, state_dynamics_model)
@@ -320,6 +321,22 @@ contains
                                               filter%w_2_2n1*matmul(sigma_points(:,i:i), &
                                                                     transpose(sigma_points_meas(meas_ii(1:meas_dim),i:i)))
         end do
+        !! calculate Kalman gain
+        p_xz_transpose = transpose(cross_correlation(:,1:meas_dim))
+        temp = 0.0_dp !! (meas_dim x 6) to be filled in
+        do concurrent (i=1:6)
+            call forward_substitution(L=square_root_measurement_covariance(1:meas_dim,1:meas_dim), & !! sqrt measurement cov
+                                      b=p_xz_transpose(1:meas_dim,i), &                              !! cross covariance for each state dimension
+                                      x=temp(1:meas_dim,i))                                          !! temporary solution vector
+        end do
+        s_z_transpose = transpose(square_root_measurement_covariance(1:meas_dim,1:meas_dim))
+        k_t = 0.0_dp !! transpose of Kalman gain, solved for using temp from above
+        do concurrent (i=1:6)
+            call backward_substitution(U=s_z_transpose(1:meas_dim,1:meas_dim), & !! transpose(Sz)
+                                       b=temp(1:meas_dim,i), &                   !! columns of temp, solved for above
+                                       x=k_t(1:meas_dim,i))                      !! columns of transpose(Kalman gain) --> rows of Kalman gain
+        end do
+        kalman_gain(:,1:meas_dim) = transpose(k_t(1:meas_dim,:))
     end
 
     pure subroutine filter_time_update(filter, t, state_dynamics_model)
