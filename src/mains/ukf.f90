@@ -6,6 +6,8 @@ use, non_intrinsic :: vector_math, only: vmag
 use, non_intrinsic :: matrix_math, only: chol, qr, forward_substitution, backward_substitution
 use, non_intrinsic :: array_utils, only: broadcast_sub
 use, non_intrinsic :: random, only: random_normal
+use, non_intrinsic :: statistics, only: avg
+use, non_intrinsic :: sorting, only: sort
 implicit none
 private
 
@@ -36,12 +38,13 @@ private
         implicit none
             real(dp), intent(inout) :: state(6)
             real(dp), intent(in) :: dt
-            real(dp), intent(in), optional :: opt_data(:)
+            real(dp), intent(in) :: opt_data(:)
         end
     end interface
 
     public :: dp, nmi2ft_dp, deg2rad_dp, g, sr_ukf_type, initialize_sr_ukf, dynamics_ballistic, filter_measurement_update, &
-              generate_observation, print_status, print_matrix
+              generate_observation, print_status, print_matrix, dynamics_constant_velocity, dynamics_constant_acceleration, &
+              dynamics_model, rmse, sort, dump_states
 
 contains
 
@@ -244,17 +247,18 @@ contains
         end if
     end
 
-    impure subroutine filter_measurement_update(obs, meas, meas_sig, filter, t, state_dynamics_model)
+    impure subroutine filter_measurement_update(obs, meas, meas_sig, filter, t, state_dynamics_model, opt_data)
         real(dp), intent(in) :: obs(6), meas(4), meas_sig(4)
         type(sr_ukf_type), intent(inout) :: filter
         real(dp), intent(in) :: t
         procedure(dynamics_model) :: state_dynamics_model
+        real(dp), intent(in) :: opt_data(:)
         real(dp) :: sigma_points(6,13), sigma_points_meas(4,13), pred_meas(4), innovation(4), amat(4,19), amat_t(19,4), sqrt_wc, &
                     square_root_measurement_covariance(4,4), cross_correlation(6,4), p_xz_transpose(4,6), temp(4,6), &
                     s_z_transpose(4,4), k_t(4,6), kalman_gain(6,4), p(6,6), pzz_plus_r(4,4)
         integer :: i, meas_dim, meas_ii(4), meas_index
         !! update filter to current time
-        call filter_time_update(filter, t, state_dynamics_model)
+        call filter_time_update(filter, t, state_dynamics_model, opt_data)
         !! return early if measurement provides no information
         if (count(meas_sig > 0.0_dp) < 1) then
             return
@@ -374,10 +378,11 @@ contains
         end do
     end
 
-    pure subroutine filter_time_update(filter, t, state_dynamics_model)
+    pure subroutine filter_time_update(filter, t, state_dynamics_model, opt_data)
         type(sr_ukf_type), intent(inout) :: filter
         real(dp), intent(in) :: t
         procedure(dynamics_model) :: state_dynamics_model
+        real(dp), intent(in) :: opt_data(:)
         real(dp) :: dt, sigma_points(6,13), amat(6,19), sqrt_wc, amat_t(19,6), r(6,6)
         integer :: i
         call debug_error_condition(filter%state_estimate_time < 0.0_dp, 'filter is not initialized')
@@ -389,7 +394,7 @@ contains
         call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
         !! propagate sigma points through system dynamics
         do concurrent (i=1:13)
-            call state_dynamics_model(sigma_points(:,i), dt, [filter%maximum_velocity])
+            call state_dynamics_model(sigma_points(:,i), dt, opt_data)
         end do
         !! calculate sigma point weighted average state estimate
         filter%state_estimate = filter%wx_1*sigma_points(:,1)
@@ -436,13 +441,44 @@ contains
         end do
     end
 
+    pure subroutine dynamics_constant_velocity(state, dt, opt_data)
+        real(dp), intent(inout) :: state(6)
+        real(dp), intent(in) :: dt
+        real(dp), intent(in) :: opt_data(:)
+        call debug_error_condition(size(opt_data) /= 0, 'dynamics_constant_velocity does not accept optional data')
+        state(1:2) = state(1:2) + dt*state(3:4)
+    end
+
+    pure subroutine dynamics_constant_acceleration(state, dt, opt_data)
+        real(dp), intent(inout) :: state(6)
+        real(dp), intent(in) :: dt
+        real(dp), intent(in) :: opt_data(:)
+        real(dp) :: vel_max, spd0, acc_max, acc0
+        call debug_error_condition((size(opt_data) /= 0) .and. (size(opt_data) /= 2), &
+                                   'dynamics_constant_acceleration can only accept size 2 optional data')
+        if (size(opt_data) == 2) then
+            vel_max = opt_data(1)
+            acc_max = opt_data(2)
+        else
+            vel_max = huge(1.0_dp)
+            acc_max = huge(1.0_dp)
+        end if
+        acc0 = sqrt(state(5)**2 + state(6)**2)
+        if (acc0 > acc_max) state(5:6) = state(5:6)/(acc0/acc_max)
+        state(3:4) = state(3:4) + dt*state(5:6)
+        spd0 = sqrt(state(3)**2 + state(4)**2)
+        if (spd0 > vel_max) state(3:4) = state(3:4)/(spd0/vel_max)
+        state(1:2) = state(1:2) + dt*state(3:4)
+    end
+
     pure subroutine dynamics_ballistic(state, dt, opt_data)
         real(dp), intent(inout) :: state(6)
         real(dp), intent(in) :: dt
-        real(dp), intent(in), optional :: opt_data(:)
+        real(dp), intent(in) :: opt_data(:)
         real(dp) :: vel_max, spd0
-        if (present(opt_data)) then
-            call debug_error_condition(size(opt_data) /= 1, 'dynamics_ballistic can only accept size 1 optional data')
+        call debug_error_condition((size(opt_data) /= 0) .and. (size(opt_data) /= 1), &
+                                   'dynamics_ballistic can only accept size 1 optional data')
+        if (size(opt_data) == 1) then
             vel_max = opt_data(1)
         else
             vel_max = huge(1.0_dp)
@@ -539,6 +575,28 @@ contains
         write(*,'(a,/)') repeat('=', 32)
     end
 
+    pure function rmse(predicted, observed) result(val)
+        real(dp), intent(in) :: predicted(:), observed
+        real(dp) :: val
+        real(dp) :: diff2(size(predicted))
+        diff2 = (predicted - observed)**2
+        val = sqrt(avg(diff2))
+    end
+
+    impure subroutine dump_states(fid, model_ii, t, obs, tgt, trk)
+        integer, intent(in) :: fid, model_ii
+        real(dp), intent(in) :: t, obs(6), tgt(6), trk(6)
+        real(dp) :: trk_err(6), tru_pol(4), trk_pol(4), trk_err_pol(4), pos_vel_acc_err(3)
+        trk_err = abs(trk - tgt)
+        pos_vel_acc_err(1) = sqrt(trk_err(1)**2 + trk_err(2))
+        pos_vel_acc_err(2) = sqrt(trk_err(3)**2 + trk_err(4))
+        pos_vel_acc_err(3) = sqrt(trk_err(5)**2 + trk_err(6))
+        call cart2pol(obs, tgt, tru_pol)
+        call cart2pol(obs, trk, trk_pol)
+        trk_err_pol = abs(trk_pol - tru_pol)
+        write(fid,'(i0,40(",",e13.6))') model_ii, t, obs, tgt, trk, trk_err, pos_vel_acc_err, tru_pol, trk_pol, trk_err_pol
+    end
+
 end module ukf
 
 
@@ -546,40 +604,137 @@ program ex_ukf
 use, non_intrinsic :: ukf
 implicit none
 
-    logical, parameter :: debug = .true.
+    logical, parameter :: debug(*) = [.false., & !! per-observation
+                                      .false., & !! per-trial
+                                      .false., & !! all-trial summary
+                                      .false., & !! per-observation output to file
+                                      .true.] !! per-trial output to file
     real(dp), parameter :: dt = 1.0_dp
+    integer, parameter :: max_trials = 1
 
     type(sr_ukf_type) :: filter
-    real(dp) :: obs(6), tgt(6), meas(4), meas_sig(4), t
+    real(dp) :: obs(6), tgt(6), meas(4), meas_sig(4), t, no_opt_data(0), se_err(9,max_trials), tgt0(6)
+    procedure(dynamics_model), pointer :: state_dynamics_model
+    character(len=:), allocatable :: state_dynamics_model_name
+    real(dp), allocatable :: opt_data(:)
+    integer :: state_model_ii, trial_ii, i, in_run_stats_fid, end_run_stats_fid
 
     !! observer initial conditions
     obs = 0.0_dp
+    !! sensor measurement sigmas
+!    meas_sig = [10.0_dp*nmi2ft_dp,  5.0_dp*deg2rad_dp, 200.0_dp,             -1.0_dp] !! poor measurement quality
+!    meas_sig = [ 1.0_dp*nmi2ft_dp,  1.0_dp*deg2rad_dp, 100.0_dp,             -1.0_dp] !! standard measurement quality
+!    meas_sig = [         100.0_dp,  0.1_dp*deg2rad_dp,  10.0_dp,             -1.0_dp] !! excellent measurement quality
+    meas_sig = [           1.0_dp, 0.01_dp*deg2rad_dp,   0.1_dp, 0.001_dp*deg2rad_dp] !! "perfect" measurements
+
+    open(newunit=in_run_stats_fid, file='/valinor/in-run-stats.csv', action='write')
+    write(unit=in_run_stats_fid, fmt='(a)') 'state_model_ii,t,obs_x,obs_y,obs_vx,obs_vy,obs_ax,obs_ay,tgt_x,tgt_y,tgt_vx,'// &
+                                            'tgt_vy,tgt_ax,tgt_ay,trk_x,trk_y,trk_vx,trk_vy,trk_ax,trk_ay,trk_err_x,trk_err_y,'// &
+                                            'trk_err_vx,trk_err_vy,trk_err_ax,trk_err_ay,trk_pos_err,trk_vel_err,trk_acc_err,'// &
+                                            'rng,ang,rng_rt,ang_rt,trk_rng,trk_ang,trk_rng_rt,trk_ang_rt,trk_rng_err,'// &
+                                            'trk_ang_err,trk_rng_rt_err,trk_ang_rt_err'
+    open(newunit=end_run_stats_fid, file='/valinor/end-run-stats.csv', action='write')
+    write(unit=end_run_stats_fid, fmt='(a)') 'state_model_ii,t,obs_x,obs_y,obs_vx,obs_vy,obs_ax,obs_ay,tgt_x,tgt_y,tgt_vx,'// &
+                                            'tgt_vy,tgt_ax,tgt_ay,trk_x,trk_y,trk_vx,trk_vy,trk_ax,trk_ay,trk_err_x,trk_err_y,'// &
+                                            'trk_err_vx,trk_err_vy,trk_err_ax,trk_err_ay,trk_pos_err,trk_vel_err,trk_acc_err,'// &
+                                            'rng,ang,rng_rt,ang_rt,trk_rng,trk_ang,trk_rng_rt,trk_ang_rt,trk_rng_err,'// &
+                                            'trk_ang_err,trk_rng_rt_err,trk_ang_rt_err'
+
+    do state_model_ii=1,3
+    if (allocated(opt_data)) deallocate(opt_data)
+    select case (state_model_ii)
+        case (1)
+            state_dynamics_model => dynamics_constant_velocity
+            state_dynamics_model_name = 'Constant-Velocity'
+            allocate(opt_data(0))
+        case (2)
+            state_dynamics_model => dynamics_constant_acceleration
+            state_dynamics_model_name = 'Constant-Acceleration'
+            opt_data = [filter%maximum_velocity, filter%maximum_acceleration]
+        case (3)
+            state_dynamics_model => dynamics_ballistic
+            state_dynamics_model_name = 'Ballistic'
+            opt_data = [filter%maximum_velocity]
+        case default
+            error stop 'no state_dynamics_model defined'
+    end select
+
+    !$omp parallel do default(firstprivate) shared(se_err)
+    do trial_ii=1,max_trials
 
     !! target initial conditions
-    tgt = [200.0_dp*nmi2ft_dp, 200000.0_dp, &
+    tgt = [200.0_dp*nmi2ft_dp, 1.0_dp, &
            -3000.0_dp*cos(45.0_dp*deg2rad_dp), 3000.0_dp*sin(45.0_dp*deg2rad_dp), &
            0.0_dp, -1.0_dp*g]
-
-    !! sensor measurement sigmas
-    meas_sig = [10.0_dp*nmi2ft_dp, 5.0_dp*deg2rad_dp, 200.0_dp, -1.0_dp]
-
+    tgt0 = tgt
     !! generate initial measurement and initialize Square Root Unscented Kalman Filter
     t = 0.0_dp
     call generate_observation(obs, tgt, meas, meas_sig)
-    call initialize_sr_ukf(obs, meas, meas_sig, filter)
-    if (debug) call print_status(t, obs, tgt, filter)
+    call initialize_sr_ukf(obs, meas, meas_sig, filter, noise=3.0_dp*g)
+    if (debug(1)) call print_status(t, obs, tgt, filter)
 
-    do while (tgt(2) > 1000.0_dp)
-
-    !! evolve simulation time
-    t = t + dt
-    call dynamics_ballistic(tgt, dt)
-
-    !! incorporate new measurement
-    call generate_observation(obs, tgt, meas, meas_sig)
-    call filter_measurement_update(obs, meas, meas_sig, filter, t, dynamics_ballistic)
-    if (debug) call print_status(t, obs, tgt, filter)
-
+    do while (tgt(2) > 0.0_dp)
+        !! evolve simulation time
+        t = t + dt
+        call dynamics_ballistic(tgt, dt, no_opt_data)
+        !! incorporate new measurement
+        call generate_observation(obs, tgt, meas, meas_sig)
+        call filter_measurement_update(obs, meas, meas_sig, filter, t, state_dynamics_model, opt_data)
+        if (debug(1)) call print_status(t, obs, tgt, filter)
+        if (debug(4)) then
+            call dump_states(in_run_stats_fid, state_model_ii, t, obs, tgt, filter%state_estimate)
+            flush(in_run_stats_fid)
+        end if
     end do
+    if (debug(5)) then
+        call dump_states(end_run_stats_fid, state_model_ii, t, obs, tgt, filter%state_estimate)
+        flush(end_run_stats_fid)
+    end if
+
+    se_err(1:6,trial_ii) = filter%state_estimate - tgt
+    se_err(7,trial_ii) = sqrt(se_err(1,trial_ii)**2 + se_err(2,trial_ii)**2) !! position error
+    se_err(8,trial_ii) = sqrt(se_err(3,trial_ii)**2 + se_err(4,trial_ii)**2) !! velocity error
+    se_err(9,trial_ii) = sqrt(se_err(5,trial_ii)**2 + se_err(6,trial_ii)**2) !! acceleration error
+    if (debug(2)) then
+        call print_status(t, obs, tgt, filter, .true.)
+        write(*,'(a)') repeat('=', 32)
+        write(*,'(a)') 'State Dynamics Model '//state_dynamics_model_name
+        write(*,'(a,e13.6,a,f0.1,a)') 'Filter Noise: ',filter%process_noise,' ft/sec**2 (',filter%process_noise/g,' g)'
+        write(*,'(6(a,e13.6))') 'Target Initial Conditions :: x: ',tgt0(1),', y: ',tgt0(2), &
+                                ', vx: ',tgt0(3),', vy: ',tgt0(4),', ax: ',tgt0(5),', ay: ',tgt0(6)
+        write(*,'(6(a,e13.6))') '              Track Error :: x: ',se_err(1,trial_ii), ', y: ',se_err(2,trial_ii), &
+                                                          ', vx: ',se_err(3,trial_ii),', vy: ',se_err(4,trial_ii), &
+                                                          ', ax: ',se_err(5,trial_ii),', ay: ',se_err(6,trial_ii)
+        write(*,'(a,/)') repeat('=', 32)
+    end if
+
+    end do !! trial_ii
+    !$omp end parallel do
+
+    if (debug(3)) then
+        write(*,'(a)') repeat('=', 32)
+        write(*,'(6(a,e13.6))') '               Track RMSE :: x: ',rmse(se_err(1,:),0.0_dp), ', y: ',rmse(se_err(2,:),0.0_dp), &
+                                                          ', vx: ',rmse(se_err(3,:),0.0_dp),', vy: ',rmse(se_err(4,:),0.0_dp), &
+                                                          ', ax: ',rmse(se_err(5,:),0.0_dp),', ay: ',rmse(se_err(6,:),0.0_dp)
+        write(*,'(3(a,e13.6))') '       Track Summary RMSE :: pos: ',rmse(se_err(7,:), 0.0_dp), &
+                                                           ', vel: ',rmse(se_err(8,:), 0.0_dp), &
+                                                           ', acc: ',rmse(se_err(9,:), 0.0_dp)
+        se_err = abs(se_err)
+        do concurrent (i=7:9)
+            call sort(se_err(i,:))
+        end do
+        do i=10,90,10
+            trial_ii = min(max_trials, max(1, floor(i*max_trials/100.0_dp)))
+            write(*,'(a,i0,3(a,e13.6))') 'percentile(',i,') RMSE :: pos: ',se_err(7,trial_ii), &
+                                                                 ', vel: ',se_err(8,trial_ii), &
+                                                                 ', acc: ',se_err(9,trial_ii)
+        end do
+        write(*,'(a,/)') repeat('=', 32)
+    end if
+
+    end do !! state_model_ii
+
+    close(in_run_stats_fid)
+    close(end_run_stats_fid)
 
 end program ex_ukf
