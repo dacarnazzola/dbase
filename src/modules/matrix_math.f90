@@ -20,7 +20,11 @@ private
         module procedure :: forward_substitution_dp
     end interface forward_substitution
 
-    public :: chol, qr, forward_substitution
+    interface backward_substitution
+        module procedure :: backward_substitution_dp
+    end interface backward_substitution
+
+    public :: chol, qr, forward_substitution, backward_substitution
 
 contains
 
@@ -171,7 +175,7 @@ contains
                                    'module MATRIX_MATH :: subroutine forward_substitution requires size b vector >= 1')
         call debug_error_condition(logical(size(L, dim=1, kind=i64) /= size(L, dim=2, kind=i64), kind=c_bool), &
                                    'module MATRIX_MATH :: subroutine forward_substitution requires L be square (n x n) matrix')
-        call debug_error_condition(logical(any([(abs(L(i,i)) < spacing(0.0_dp), i=1_i64,size(L,dim=1,kind=i64))]), kind=c_bool), &
+        call debug_error_condition(logical(any([(nearly(L(i,i), 0.0_dp), i=1_i64,size(L,dim=1,kind=i64))]), kind=c_bool), &
                                    'module MATRIX_MATH :: subroutine forward_substitution requires L(i,i) NOT nearly 0.0')
         call debug_error_condition(logical(size(b, kind=i64) /= size(L, dim=1, kind=i64), kind=c_bool), &
                                    'module MATRIX_MATH :: subroutine forward_substitution requires b vector same dimension as L')
@@ -183,5 +187,28 @@ contains
             x(i) = (b(i) - temp)/L(i,i)
         end do
     end subroutine forward_substitution_dp
+
+    pure subroutine backward_substitution_dp(U, b, x)
+        real(kind=dp), intent(in) :: U(:,:), b(:)
+        real(kind=dp), intent(out) :: x(:)
+        integer(kind=i64) :: i, n
+        real(kind=dp) :: temp
+        call debug_error_condition(logical(size(b, kind=i64) < 1_i64, kind=c_bool), &
+                                   'module MATRIX_MATH :: subroutine backward_substitution requires size b vector >= 1')
+        call debug_error_condition(logical(size(U, dim=1, kind=i64) /= size(U, dim=2, kind=i64), kind=c_bool), &
+                                   'module MATRIX_MATH :: subroutine backward_substitution requires U be square (n x n) matrix')
+        call debug_error_condition(logical(any([(nearly(U(i,i), 0.0_dp), i=1_i64,size(U,dim=1,kind=i64))]), kind=c_bool), &
+                                   'module MATRIX_MATH :: subroutine backward_substitution requires U(i,i) NOT nearly 0.0')
+        call debug_error_condition(logical(size(b, kind=i64) /= size(U, dim=1, kind=i64), kind=c_bool), &
+                                   'module MATRIX_MATH :: subroutine backward_substitution requires b vector same dimension as U')
+        call debug_error_condition(logical(size(x, kind=i64) /= size(U, dim=1, kind=i64), kind=c_bool), &
+                                   'module MATRIX_MATH :: subroutine backward_substitution requires x vector same dimension as U')
+        n = size(b, kind=i64)
+        x(n) = b(n)/U(n,n)
+        do i=n,1_i64,-1_i64
+            temp = vdot(U(i,i+1_i64:n), x(i+1_i64:n))
+            x(i) = (b(i) - temp)/U(i,i)
+        end do
+    end subroutine backward_substitution_dp
 
 end module matrix_math
