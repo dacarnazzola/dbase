@@ -1,6 +1,6 @@
 module ukf
 use, non_intrinsic :: kinds, only: dp
-use, non_intrinsic :: constants, only: nmi2ft_dp, deg2rad_dp
+use, non_intrinsic :: constants, only: nmi2ft_dp, deg2rad_dp, eps_dp
 use, non_intrinsic :: system, only: debug_error_condition, nearly
 use, non_intrinsic :: vector_math, only: vmag
 use, non_intrinsic :: matrix_math, only: chol, qr, forward_substitution, backward_substitution
@@ -41,7 +41,7 @@ private
     end interface
 
     public :: dp, nmi2ft_dp, deg2rad_dp, g, sr_ukf_type, initialize_sr_ukf, dynamics_ballistic, filter_measurement_update, &
-              generate_observation
+              generate_observation, print_status, print_matrix
 
 contains
 
@@ -244,14 +244,14 @@ contains
         end if
     end
 
-    pure subroutine filter_measurement_update(obs, meas, meas_sig, filter, t, state_dynamics_model)
+    impure subroutine filter_measurement_update(obs, meas, meas_sig, filter, t, state_dynamics_model)
         real(dp), intent(in) :: obs(6), meas(4), meas_sig(4)
         type(sr_ukf_type), intent(inout) :: filter
         real(dp), intent(in) :: t
         procedure(dynamics_model) :: state_dynamics_model
         real(dp) :: sigma_points(6,13), sigma_points_meas(4,13), pred_meas(4), innovation(4), amat(4,19), amat_t(19,4), sqrt_wc, &
                     square_root_measurement_covariance(4,4), cross_correlation(6,4), p_xz_transpose(4,6), temp(4,6), &
-                    s_z_transpose(4,4), k_t(4,6), kalman_gain(6,4)
+                    s_z_transpose(4,4), k_t(4,6), kalman_gain(6,4), p(6,6), pzz_plus_r(4,4)
         integer :: i, meas_dim, meas_ii(4), meas_index
         !! update filter to current time
         call filter_time_update(filter, t, state_dynamics_model)
@@ -311,7 +311,8 @@ contains
         !! calculate square root of measurement covariance
         amat_t = transpose(amat)
         call qr(amat_t(1:13+meas_dim,1:meas_dim))
-        call extract_rt(amat_t(1:meas_dim,1:meas_dim), square_root_measurement_covariance)
+        square_root_measurement_covariance = 0.0_dp
+        call extract_rt(amat_t(1:meas_dim,1:meas_dim), square_root_measurement_covariance(1:meas_dim,1:meas_dim))
         !! calculate cross correlation
         cross_correlation = 0.0_dp
         cross_correlation(:,1:meas_dim) = filter%wc_1**2*matmul(sigma_points(:,1:1), &
@@ -322,14 +323,14 @@ contains
                                                                     transpose(sigma_points_meas(meas_ii(1:meas_dim),i:i)))
         end do
         !! calculate Kalman gain
-        p_xz_transpose = transpose(cross_correlation(:,1:meas_dim))
+        p_xz_transpose(1:meas_dim,:) = transpose(cross_correlation(:,1:meas_dim))
         temp = 0.0_dp !! (meas_dim x 6) to be filled in
         do concurrent (i=1:6)
             call forward_substitution(L=square_root_measurement_covariance(1:meas_dim,1:meas_dim), & !! sqrt measurement cov
                                       b=p_xz_transpose(1:meas_dim,i), &                              !! cross covariance for each state dimension
                                       x=temp(1:meas_dim,i))                                          !! temporary solution vector
         end do
-        s_z_transpose = transpose(square_root_measurement_covariance(1:meas_dim,1:meas_dim))
+        s_z_transpose(1:meas_dim,1:meas_dim) = transpose(square_root_measurement_covariance(1:meas_dim,1:meas_dim))
         k_t = 0.0_dp !! transpose of Kalman gain, solved for using temp from above
         do concurrent (i=1:6)
             call backward_substitution(U=s_z_transpose(1:meas_dim,1:meas_dim), & !! transpose(Sz)
@@ -339,6 +340,38 @@ contains
         kalman_gain(:,1:meas_dim) = transpose(k_t(1:meas_dim,:))
         !! update filter%state_estimate
         filter%state_estimate = filter%state_estimate + matmul(kalman_gain(:,1:meas_dim), innovation(meas_ii(1:meas_dim)))
+        !! update filter%covariance_square_root
+        call reform_cov(filter%covariance_square_root, p)
+        call reform_cov(square_root_measurement_covariance(1:meas_dim,1:meas_dim), pzz_plus_r(1:meas_dim,1:meas_dim))
+        p = p - matmul(kalman_gain(:,1:meas_dim), matmul(pzz_plus_r(1:meas_dim,1:meas_dim), k_t(1:meas_dim,:)))
+        call chol(p, filter%covariance_square_root)
+    end
+
+    impure subroutine print_matrix(msg, mat)
+        character(len=*), intent(in) :: msg
+        real(dp), intent(in) :: mat(:,:)
+        integer :: i
+        write(*,'(a)') msg
+        do i=1,size(mat,dim=1)
+           write(*,'(*(e13.6," "))') mat(i,:) 
+        end do
+    end
+
+    pure subroutine reform_cov(sqrt_cov, cov)
+        real(dp), intent(in) :: sqrt_cov(:,:)
+        real(dp), intent(out) :: cov(:,:)
+        integer :: n, i, j
+        call debug_error_condition(size(sqrt_cov,dim=1) /= size(sqrt_cov,dim=2), 'sqrt_cov must be square')
+        call debug_error_condition(size(cov,dim=1) /= size(sqrt_cov,dim=1), 'cov dim 1 must match sqrt_cov dim 1')
+        call debug_error_condition(size(cov,dim=2) /= size(sqrt_cov,dim=2), 'cov dim 1 must match sqrt_cov dim 1')
+        cov = matmul(sqrt_cov, transpose(sqrt_cov))
+        n = size(cov, dim=1)
+        do i=1,n
+            do j=i+1,n
+                cov(j,i) = cov(i,j)
+            end do
+            cov(i,i) = cov(i,i) + eps_dp
+        end do
     end
 
     pure subroutine filter_time_update(filter, t, state_dynamics_model)
@@ -478,6 +511,34 @@ contains
         end if
     end
 
+    impure subroutine print_status(sim_t, obs, tgt, filter, extra)
+        real(dp), intent(in) :: sim_t, obs(6), tgt(6)
+        type(sr_ukf_type), intent(in) :: filter
+        logical, intent(in), optional :: extra
+        real(dp) :: p(6,6)
+        integer :: i
+        write(*,'(a)') repeat('=', 32)
+        write(*,'(a,2(f0.4,a))') 'Simulation Time: ',sim_t,' seconds, Filter Time: ',filter%state_estimate_time,' seconds'
+        write(*,'(6(a,e13.6))') '       Observer State :: x: ',obs(1),', y: ',obs(2), &
+                               ', vx: ',obs(3),', vy: ',obs(4),', ax: ',obs(5),', ay: ',obs(6)
+        write(*,'(6(a,e13.6))') '         Target State :: x: ',tgt(1),', y: ',tgt(2), &
+                               ', vx: ',tgt(3),', vy: ',tgt(4),', ax: ',tgt(5),', ay: ',tgt(6)
+        write(*,'(6(a,e13.6))') 'Filter State Estimate :: x: ',filter%state_estimate(1),', y: ',filter%state_estimate(2), &
+                               ', vx: ',filter%state_estimate(3),', vy: ',filter%state_estimate(4), &
+                               ', ax: ',filter%state_estimate(5),', ay: ',filter%state_estimate(6)
+        call reform_cov(filter%covariance_square_root, p)
+        write(*,'(6(a,e13.6))') '         Track Sigmas :: x: ',sqrt(p(1,1)),', y: ',sqrt(p(2,2)), &
+                               ', vx: ',sqrt(p(3,3)),', vy: ',sqrt(p(4,4)),', ax: ',sqrt(p(5,5)),', ay: ',sqrt(p(6,6))
+        if (present(extra)) then
+            if (extra) then
+                do i=1,6
+                    write(*,'(a,i0,a,6(e13.6," "))') 'Full Track Covariance (row ',i,'): ',p(i,:)
+                end do
+            end if
+        end if
+        write(*,'(a,/)') repeat('=', 32)
+    end
+
 end module ukf
 
 
@@ -485,6 +546,7 @@ program ex_ukf
 use, non_intrinsic :: ukf
 implicit none
 
+    logical, parameter :: debug = .true.
     real(dp), parameter :: dt = 1.0_dp
 
     type(sr_ukf_type) :: filter
@@ -499,12 +561,15 @@ implicit none
            0.0_dp, -1.0_dp*g]
 
     !! sensor measurement sigmas
-    meas_sig = [100.0_dp, 0.1_dp*deg2rad_dp, 10.0_dp, 0.01_dp*deg2rad_dp]
+    meas_sig = [10.0_dp*nmi2ft_dp, 5.0_dp*deg2rad_dp, 200.0_dp, -1.0_dp]
 
     !! generate initial measurement and initialize Square Root Unscented Kalman Filter
     t = 0.0_dp
     call generate_observation(obs, tgt, meas, meas_sig)
     call initialize_sr_ukf(obs, meas, meas_sig, filter)
+    if (debug) call print_status(t, obs, tgt, filter)
+
+    do while (tgt(2) > 1000.0_dp)
 
     !! evolve simulation time
     t = t + dt
@@ -513,5 +578,8 @@ implicit none
     !! incorporate new measurement
     call generate_observation(obs, tgt, meas, meas_sig)
     call filter_measurement_update(obs, meas, meas_sig, filter, t, dynamics_ballistic)
+    if (debug) call print_status(t, obs, tgt, filter)
+
+    end do
 
 end program ex_ukf
