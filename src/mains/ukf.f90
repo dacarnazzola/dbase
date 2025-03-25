@@ -598,9 +598,9 @@ contains
                                                   tru_pol, trk_pol, trk_err_pol
     end
 
-    impure subroutine dump_summary(fid, reps, model_ii, filter_noise, init_sig, meas_sig, se_err, se_err_pol)
+    impure subroutine dump_summary(fid, reps, model_ii, filter_noise, init_sig_scale, init_sig, meas_sig, se_err, se_err_pol)
         integer, intent(in) :: fid, reps, model_ii
-        real(dp), intent(in) :: filter_noise, init_sig(4), meas_sig(4), se_err(:,:), se_err_pol(:,:)
+        real(dp), intent(in) :: filter_noise, init_sig_scale, init_sig(4), meas_sig(4), se_err(:,:), se_err_pol(:,:)
         real(dp) :: rmse_state(size(se_err,dim=1)), rmse_pol(size(se_err_pol,dim=1))
         integer :: i
         call debug_error_condition(size(se_err,dim=1) /= 9, 'se_err should have 9 rows')
@@ -612,7 +612,8 @@ contains
         do concurrent (i=1:size(rmse_pol))
             rmse_pol(i) = rmse(se_err_pol(i,:), 0.0_dp)
         end do
-        write(unit=fid, fmt='(i0,",",i0,23(",",e13.6))') reps, model_ii, filter_noise, init_sig, meas_sig, rmse_state, rmse_pol
+        write(unit=fid, fmt='(i0,",",i0,24(",",e13.6))') reps, model_ii, filter_noise, init_sig_scale, init_sig, &
+                                                         meas_sig, rmse_state, rmse_pol
     end
 
 end module ukf
@@ -624,34 +625,30 @@ implicit none
 
     logical, parameter :: debug(*) = [.false., & !! 1, per-observation
                                       .false., & !! 2, per-trial
-                                      .false., & !! 3, all-trial summary
+                                      .true., & !! 3, all-trial summary
                                       .false., & !! 4, per-observation output to file
-                                      .false., & !! 5, per-trial output to file
+                                      .true., & !! 5, per-trial output to file
                                       .true.] !! 6, all-trial summary output to file
     real(dp), parameter :: dt = 1.0_dp
-    integer, parameter :: max_trials = 32
+    integer, parameter :: max_trials = 1024
     real(dp), parameter :: meas_sig1_list(*) = [-1.0_dp, 1.0_dp, 10.0_dp, 100.0_dp, nmi2ft_dp, 10.0_dp*nmi2ft_dp]
     real(dp), parameter :: meas_sig2_list(*) = [-1.0_dp, 0.01_dp*deg2rad_dp, 0.1_dp*deg2rad_dp, deg2rad_dp, 5.0_dp*deg2rad_dp]
     real(dp), parameter :: meas_sig3_list(*) = [-1.0_dp, 0.1_dp, 10.0_dp, 100.0_dp, 200.0_dp]
     real(dp), parameter :: meas_sig4_list(*) = [-1.0_dp, 0.001_dp*deg2rad_dp, 0.01_dp*deg2rad_dp, 0.1_dp*deg2rad_dp]
+    real(dp), parameter :: init_scale_list(*) = [1.0_dp, 1.5_dp, 2.0_dp, 2.5_dp, 3.0_dp]
     real(dp), parameter :: noise_list(*) = [0.01_dp/g, 0.01_dp, 0.1_dp, 1.0_dp, 2.0_dp, 3.0_dp, 4.0_dp, 5.0_dp, 6.0_dp, 9.0_dp]*g
 
     type(sr_ukf_type) :: filter
     real(dp) :: obs(6), tgt(6), meas(4), meas_sig(4), init_sig(4), t, no_opt_data(0), se_err(9,max_trials), tgt0(6), tgt_pol(4), &
-                se_err_pol(4,max_trials), trk_pol(4), noise
+                se_err_pol(4,max_trials), trk_pol(4), noise, init_sig_scale
     procedure(dynamics_model), pointer :: state_dynamics_model
     character(len=:), allocatable :: state_dynamics_model_name
     real(dp), allocatable :: opt_data(:)
     integer :: state_model_ii, trial_ii, i, in_run_stats_fid, end_run_stats_fid, meas_sig1_ii, meas_sig2_ii, meas_sig3_ii, &
-               meas_sig4_ii, sr_ukf_summary_fid, noise_ii, init_sig1_ii, init_sig2_ii, init_sig3_ii, init_sig4_ii
+               meas_sig4_ii, sr_ukf_summary_fid, noise_ii, init_sig1_ii, init_sig2_ii, init_sig3_ii, init_sig4_ii, init_scale_ii
 
     !! observer initial conditions
     obs = 0.0_dp
-    !! sensor measurement sigmas
-    meas_sig = [10.0_dp*nmi2ft_dp,  5.0_dp*deg2rad_dp, 200.0_dp,             -1.0_dp] !! poor measurement quality
-!    meas_sig = [ 1.0_dp*nmi2ft_dp,  1.0_dp*deg2rad_dp, 100.0_dp,             -1.0_dp] !! standard measurement quality
-!    meas_sig = [         100.0_dp,  0.1_dp*deg2rad_dp,  10.0_dp,             -1.0_dp] !! excellent measurement quality
-!    meas_sig = [           1.0_dp, 0.01_dp*deg2rad_dp,   0.1_dp, 0.001_dp*deg2rad_dp] !! "perfect" measurements
 
     open(newunit=in_run_stats_fid, file='/valinor/in-run-stats.csv', action='write')
     write(unit=in_run_stats_fid, fmt='(a)') 'state_model_ii,t,obs_x,obs_y,obs_vx,obs_vy,obs_ax,obs_ay,tgt_x,tgt_y,tgt_vx,'// &
@@ -666,32 +663,34 @@ implicit none
                                             'rng,ang,rng_rt,ang_rt,trk_rng,trk_ang,trk_rng_rt,trk_ang_rt,trk_rng_err,'// &
                                             'trk_ang_err,trk_rng_rt_err,trk_ang_rt_err'
     open(newunit=sr_ukf_summary_fid, file='/valinor/sr-ukf-summary.csv', action='write')
-    write(unit=sr_ukf_summary_fid, fmt='(a)') 'reps,state_model_ii,process_noise,init_sig_rng,init_sig_ang,init_sig_rng_rt,'// &
-                                              'init_sig_ang_rt,sig_rng,sig_ang,sig_rng_rt,sig_ang_rt,rmse_x,'// &
+    write(unit=sr_ukf_summary_fid, fmt='(a)') 'reps,state_model_ii,process_noise,init_sig_scale,init_sig_rng,init_sig_ang,'// &
+                                              'init_sig_rng_rt,init_sig_ang_rt,sig_rng,sig_ang,sig_rng_rt,sig_ang_rt,rmse_x,'// &
                                               'rmse_y,rmse_vx,rmse_vy,rmse_ax,rmse_ay,rmse_pos,rmse_vel,rmse_acc,rmse_rng,'// &
                                               'rmse_ang,rmse_rng_rt,rmse_ang_rt'
 
-    do init_sig1_ii=1,size(meas_sig1_list)
+    do init_sig1_ii=6,6 ! 1,size(meas_sig1_list)
         init_sig(1) = meas_sig1_list(init_sig1_ii)
-    do init_sig2_ii=1,size(meas_sig2_list)
+    do init_sig2_ii=5,5 ! 1,size(meas_sig2_list)
         init_sig(2) = meas_sig2_list(init_sig2_ii)
         if (init_sig(2) <= 0.0_dp) cycle
-    do init_sig3_ii=1,size(meas_sig3_list)
+    do init_sig3_ii=5,5 ! 1,size(meas_sig3_list)
         init_sig(3) = meas_sig3_list(init_sig3_ii)
-    do init_sig4_ii=1,size(meas_sig4_list)
+    do init_sig4_ii=1,1 ! 1,size(meas_sig4_list)
         init_sig(4) = meas_sig4_list(init_sig4_ii)
+    do init_scale_ii=5,5 ! 1,size(init_scale_list)
+        init_sig_scale = init_scale_list(init_scale_ii)
     do meas_sig1_ii=6,6 ! 1,size(meas_sig1_list)
         meas_sig(1) = meas_sig1_list(meas_sig1_ii)
     do meas_sig2_ii=5,5 ! 1,size(meas_sig2_list)
         meas_sig(2) = meas_sig2_list(meas_sig2_ii)
-    do meas_sig3_ii=1,size(meas_sig3_list)
+    do meas_sig3_ii=5,5 ! 1,size(meas_sig3_list)
         meas_sig(3) = meas_sig3_list(meas_sig3_ii)
     do meas_sig4_ii=1,1 ! 1,size(meas_sig4_list)
         meas_sig(4) = meas_sig4_list(meas_sig4_ii)
-    do noise_ii=1,size(noise_list)
+    do noise_ii=10,10 ! 1,size(noise_list)
         noise = noise_list(noise_ii)
 
-    do state_model_ii=1,3 ! 1,3
+    do state_model_ii=3,3
         if (allocated(opt_data)) deallocate(opt_data)
         select case (state_model_ii)
             case (1)
@@ -721,7 +720,7 @@ implicit none
     !! generate initial measurement and initialize Square Root Unscented Kalman Filter
     t = 0.0_dp
     call generate_observation(obs, tgt, meas, init_sig)
-    call initialize_sr_ukf(obs, meas, init_sig, filter, noise=noise)
+    call initialize_sr_ukf(obs, meas, init_sig_scale*init_sig, filter, noise=noise)
     if (debug(1)) call print_status(t, obs, tgt, filter)
 
     do while (tgt(2) > 0.0_dp)
@@ -732,15 +731,9 @@ implicit none
         call generate_observation(obs, tgt, meas, meas_sig)
         call filter_measurement_update(obs, meas, meas_sig, filter, t, state_dynamics_model, opt_data)
         if (debug(1)) call print_status(t, obs, tgt, filter)
-        if (debug(4)) then
-            call dump_states(in_run_stats_fid, state_model_ii, t, obs, tgt, filter%state_estimate)
-            flush(in_run_stats_fid)
-        end if
+        if (debug(4)) call dump_states(in_run_stats_fid, state_model_ii, t, obs, tgt, filter%state_estimate)
     end do
-    if (debug(5)) then
-        call dump_states(end_run_stats_fid, state_model_ii, t, obs, tgt, filter%state_estimate)
-        flush(end_run_stats_fid)
-    end if
+    if (debug(5)) call dump_states(end_run_stats_fid, state_model_ii, t, obs, tgt, filter%state_estimate)
 
     se_err(1:6,trial_ii) = filter%state_estimate - tgt
     se_err(7,trial_ii) = sqrt(se_err(1,trial_ii)**2 + se_err(2,trial_ii)**2) !! position error
@@ -764,9 +757,12 @@ implicit none
 
     end do !! trial_ii
     !$omp end parallel do
+    flush(in_run_stats_fid)
+    flush(end_run_stats_fid)
 
     if (debug(6)) then
-        call dump_summary(sr_ukf_summary_fid, max_trials, state_model_ii, noise, init_sig, meas_sig, se_err, se_err_pol)
+        call dump_summary(sr_ukf_summary_fid, max_trials, state_model_ii, noise, init_sig_scale, init_sig, &
+                          meas_sig, se_err, se_err_pol)
         flush(sr_ukf_summary_fid)
     end if
     if (debug(3)) then
@@ -796,6 +792,7 @@ implicit none
     end do !! meas_sig3_ii
     end do !! meas_sig2_ii
     end do !! meas_sig1_ii
+    end do !! init_scale_ii
     end do !! init_sig4_ii
     end do !! init_sig3_ii
     end do !! init_sig2_ii
