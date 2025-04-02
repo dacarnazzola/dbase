@@ -28,7 +28,13 @@ private
     real(kind=sp), parameter :: nmi2ft_sp = 1852.0_sp*100.0_sp/2.54_sp/12.0_sp
     real(kind=dp), parameter :: nmi2ft_dp = 1852.0_dp*100.0_dp/2.54_dp/12.0_dp
 
+    real(kind=sp), parameter :: ft2nmi_sp = 2.54_sp*12.0_sp/1852.0_sp/100.0_sp
+    real(kind=dp), parameter :: ft2nmi_dp = 2.54_dp*12.0_dp/1852.0_dp/100.0_dp
+
+    real(kind=sp), parameter :: km2nmi_sp = 1.0_sp/1.852_sp
+    real(kind=dp), parameter :: km2nmi_dp = 1.0_dp/1.852_dp
+
     public :: debug, pi_sp, pi_dp, vec_len, twopi_sp, twopi_dp, deg2rad_sp, deg2rad_dp, rad2deg_sp, rad2deg_dp, eps_sp, eps_dp, &
-              nmi2ft_sp, nmi2ft_dp
+              nmi2ft_sp, nmi2ft_dp, ft2nmi_sp, ft2nmi_dp, km2nmi_sp, km2nmi_dp
 
 end module constants

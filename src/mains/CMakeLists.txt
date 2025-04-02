@@ -7,3 +7,6 @@ target_link_libraries(ex_particle_filter lib_modules)
 
 add_executable(ex_square_root_unscented_kalman_filter ukf.f90)
 target_link_libraries(ex_square_root_unscented_kalman_filter lib_modules)
+
+add_executable(ex_eoir_uav eoir_uav.f90)
+target_link_libraries(ex_eoir_uav lib_modules)
