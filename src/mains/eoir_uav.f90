@@ -7,7 +7,7 @@ private
 
     real(dp), parameter :: R_air = 1716.46_dp !! https://en.wikipedia.org/wiki/Gas_constant#Specific_gas_constant
 
-    public :: dp, km2nmi_dp, endurance_hr, cost_m, leg_hr, patch_area_nmi2
+    public :: dp, km2nmi_dp, endurance_hr, cost_m, leg_hr, calc_patches
 
 contains
 
@@ -60,13 +60,23 @@ contains
         val = leg_nmi*nmi2ft_dp/(mach1(alt_kft*1000.0_dp)*mach)/3600.0_dp
     end function leg_hr
 
-    pure elemental function patch_area_nmi2(alt_kft, fov_az_hw_deg, fov_el_hw_deg, az_center_deg, el_center_deg) result(val)
-        real(dp), intent(in) :: alt_kft, fov_az_hw_deg, fov_el_hw_deg, az_center_deg, el_center_deg
-        real(dp) :: val
+    pure elemental subroutine calc_patches(mach, alt_kft, fov_az_hw_deg, fov_el_hw_deg, az_center_deg, el_center_deg, &
+                                           mission_width_nmi, mission_height_nmi, &
+                                           patch_area_nmi2, mission_patches, total_route_nmi)
+        real(dp), intent(in) :: alt_kft, fov_az_hw_deg, fov_el_hw_deg, az_center_deg, el_center_deg, &
+                                mission_width_nmi, mission_height_nmi
+        real(dp), intent(out) :: patch_area_nmi2
+        integer, intent(out) :: mission_patches
+        real(dp), intent(out) :: total_route_nmi
+        real(dp) :: patch_width, patch_height
         call debug_error_condition(.not.(nearly(az_center_deg, 0.0_dp) .and. nearly(el_center_deg, 0.0_dp)), &
                                    'module EOIR_UAV_MOD :: function patch_area_nmi2 only implemented for pure lookdown case')
-        val = alt_kft*1000.0_dp*ft2nmi_dp*tan(fov_az_hw_deg*deg2rad_dp)*2.0_dp * & !! width of tangent plane patch
-              alt_kft*1000.0_dp*ft2nmi_dp*tan(fov_el_hw_deg*deg2rad_dp)*2.0_dp     !! height of tangent plane patch
+        patch_width = alt_kft*1000.0_dp*ft2nmi_dp*tan(fov_az_hw_deg*deg2rad_dp)*2.0_dp
+        patch_height = alt_kft*1000.0_dp*ft2nmi_dp*tan(fov_el_hw_deg*deg2rad_dp)*2.0_dp
+        patch_area_nmi2 = patch_width*patch_height
+        mission_patches = (mission_width_nmi*mission_height_nmi)/patch_area_nmi2
+        total_route_legs = ceiling(mission_patches)
+        total_route_nmi = 
     end function patch_area_nmi2
 
 end module eoir_uav_mod
@@ -77,12 +87,12 @@ use, non_intrinsic :: eoir_uav_mod
 implicit none
 
     real(dp), parameter :: ingress_nmi = 100.0_dp*km2nmi_dp, egress_nmi = 100.0_dp*km2nmi_dp, &
-                           mission_area_nmi2 = (100.0_dp*km2nmi_dp)**2, fov_deg_list(*) = [15.0_dp, 30.0_dp, 60.0_dp], &
-                           sensor_cost_m_list(*) = [0.05_dp, 1.0_dp, 10.0_dp]
+                           mission_width_nmi = 100.0_dp*km2nmi_dp, mission_height_nmi = 100.0_dp*km2nmi_dp, &
+                           fov_deg_list(*) = [15.0_dp, 30.0_dp, 60.0_dp], sensor_cost_m_list(*) = [0.05_dp, 1.0_dp, 10.0_dp]
 
-    integer :: mach_ii, alt_ii, fov_ii
+    integer :: mach_ii, alt_ii, fov_ii, mission_patches
     real(dp) :: mach, alt_kft, fov_deg, total_endurance_hr, ingress_time_hr, egress_time_hr, mission_time_hr, &
-                mission_patch_nmi2, mission_patches, airframe_cost_m, sensor_cost_m, total_cost_m
+                mission_patch_nmi2, airframe_cost_m, sensor_cost_m, total_cost_m, total_route_nmi
 
     write(*,'(a)') 'mach,alt_kft,sensor_fov_deg,'// &
                    'ingress_hr,egress_hr,mission_hr,total_endurance_hr,'// &
@@ -101,8 +111,9 @@ implicit none
                 fov_deg = fov_deg_list(fov_ii)
                 sensor_cost_m = sensor_cost_m_list(fov_ii)
                 total_cost_m = airframe_cost_m + sensor_cost_m
-                mission_patch_nmi2 = patch_area_nmi2(alt_kft, fov_deg*0.5_dp, fov_deg*0.5_dp, 0.0_dp, 0.0_dp)
-                mission_patches = mission_area_nmi2/mission_patch_nmi2
+                call calc_patches(mach, alt_kft, fov_deg*0.5_dp, fov_deg*0.5_dp, 0.0_dp, 0.0_dp, &
+                                  mission_width_nmi, mission_height_nmi, &
+                                  mission_patch_nmi2, mission_patches, total_route_nmi)
                 write(*,'(e13.6,11(",",e13.6))') mach, alt_kft, fov_deg, &
                                                  ingress_time_hr, egress_time_hr, mission_time_hr, total_endurance_hr, &
                                                  mission_patch_nmi2, mission_patches, &
