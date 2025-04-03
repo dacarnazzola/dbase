@@ -98,13 +98,13 @@ implicit none
     integer :: mach_ii, alt_ii, fov_ii, mission_patches
     real(dp) :: mach, alt_kft, fov_deg, total_endurance_hr, ingress_time_hr, egress_time_hr, mission_time_hr, &
                 mission_patch_nmi2, airframe_cost_m, sensor_cost_m, total_cost_m, mission_route_nmi, mission_route_hr, &
-                mission_reps, avg_mission_patch_revisit_hr
+                mission_reps
 
     write(*,'(a)') 'mach,alt_kft,sensor_fov_deg,'// &
                    'ingress_hr,egress_hr,mission_hr,total_endurance_hr,'// &
                    'mission_patch_nmi2,mission_patches,mission_route_nmi,mission_route_hr,'// &
                    'airframe_cost_m,sensor_cost_m,total_cost_m,'// &
-                   'mission_reps,avg_mission_patch_revisit_hr'
+                   'mission_reps'
     do mach_ii=40,90
         mach = real(mach_ii,dp)/100.0_dp
         do alt_ii=5,25
@@ -122,13 +122,12 @@ implicit none
                                   mission_width_nmi, mission_length_nmi, &
                                   mission_patch_nmi2, mission_patches, mission_route_nmi, mission_route_hr)
                 mission_reps = mission_time_hr/mission_route_hr
-                avg_mission_patch_revisit_hr = mission_reps/mission_time_hr ! does this seem reasonable, check...
-                write(*,'(e13.6,7(",",e13.6),",",i0,7(",",e13.6))') &
+                write(*,'(f0.2,2(",",f0.0),5(",",e13.6),",",i0,6(",",e13.6))') &
                                                         mach, alt_kft, fov_deg, &
                                                         ingress_time_hr, egress_time_hr, mission_time_hr, total_endurance_hr, &
                                                         mission_patch_nmi2, mission_patches, mission_route_nmi, mission_route_hr, &
                                                         airframe_cost_m, sensor_cost_m, total_cost_m, &
-                                                        mission_reps, avg_mission_patch_revisit_hr
+                                                        mission_reps
             end do
         end do
     end do
