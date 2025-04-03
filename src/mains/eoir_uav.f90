@@ -61,23 +61,26 @@ contains
     end function leg_hr
 
     pure elemental subroutine calc_patches(mach, alt_kft, fov_az_hw_deg, fov_el_hw_deg, az_center_deg, el_center_deg, &
-                                           mission_width_nmi, mission_height_nmi, &
-                                           patch_area_nmi2, mission_patches, total_route_nmi)
-        real(dp), intent(in) :: alt_kft, fov_az_hw_deg, fov_el_hw_deg, az_center_deg, el_center_deg, &
-                                mission_width_nmi, mission_height_nmi
+                                           mission_width_nmi, mission_length_nmi, &
+                                           patch_area_nmi2, mission_patches, total_route_nmi, total_route_hr)
+        real(dp), intent(in) :: mach, alt_kft, fov_az_hw_deg, fov_el_hw_deg, az_center_deg, el_center_deg, &
+                                mission_width_nmi, mission_length_nmi
         real(dp), intent(out) :: patch_area_nmi2
         integer, intent(out) :: mission_patches
-        real(dp), intent(out) :: total_route_nmi
-        real(dp) :: patch_width, patch_height
+        real(dp), intent(out) :: total_route_nmi, total_route_hr
+        real(dp) :: patch_width_nmi, patch_length_nmi
+        integer :: nrow, ncol
         call debug_error_condition(.not.(nearly(az_center_deg, 0.0_dp) .and. nearly(el_center_deg, 0.0_dp)), &
                                    'module EOIR_UAV_MOD :: function patch_area_nmi2 only implemented for pure lookdown case')
-        patch_width = alt_kft*1000.0_dp*ft2nmi_dp*tan(fov_az_hw_deg*deg2rad_dp)*2.0_dp
-        patch_height = alt_kft*1000.0_dp*ft2nmi_dp*tan(fov_el_hw_deg*deg2rad_dp)*2.0_dp
-        patch_area_nmi2 = patch_width*patch_height
-        mission_patches = (mission_width_nmi*mission_height_nmi)/patch_area_nmi2
-        total_route_legs = ceiling(mission_patches)
-        total_route_nmi = 
-    end function patch_area_nmi2
+        patch_width_nmi = alt_kft*1000.0_dp*ft2nmi_dp*tan(fov_az_hw_deg*deg2rad_dp)*2.0_dp
+        patch_length_nmi = alt_kft*1000.0_dp*ft2nmi_dp*tan(fov_el_hw_deg*deg2rad_dp)*2.0_dp
+        patch_area_nmi2 = patch_length_nmi*patch_width_nmi ! area = length * width
+        nrow = ceiling(mission_length_nmi/patch_length_nmi) ! round up for 100% coverage in length
+        ncol = ceiling(mission_width_nmi/patch_width_nmi) ! round up for 100% coverage in width
+        mission_patches = nrow*ncol ! area = length * width
+        total_route_nmi = -9999999.999999 !! implement this
+        total_route_hr = leg_hr(total_route_nmi, mach, alt_kft)
+    end subroutine calc_patches
 
 end module eoir_uav_mod
 
@@ -87,17 +90,19 @@ use, non_intrinsic :: eoir_uav_mod
 implicit none
 
     real(dp), parameter :: ingress_nmi = 100.0_dp*km2nmi_dp, egress_nmi = 100.0_dp*km2nmi_dp, &
-                           mission_width_nmi = 100.0_dp*km2nmi_dp, mission_height_nmi = 100.0_dp*km2nmi_dp, &
+                           mission_width_nmi = 100.0_dp*km2nmi_dp, mission_length_nmi = 100.0_dp*km2nmi_dp, &
                            fov_deg_list(*) = [15.0_dp, 30.0_dp, 60.0_dp], sensor_cost_m_list(*) = [0.05_dp, 1.0_dp, 10.0_dp]
 
     integer :: mach_ii, alt_ii, fov_ii, mission_patches
     real(dp) :: mach, alt_kft, fov_deg, total_endurance_hr, ingress_time_hr, egress_time_hr, mission_time_hr, &
-                mission_patch_nmi2, airframe_cost_m, sensor_cost_m, total_cost_m, total_route_nmi
+                mission_patch_nmi2, airframe_cost_m, sensor_cost_m, total_cost_m, mission_route_nmi, mission_route_hr, &
+                mission_reps, avg_mission_patch_revisit_hr
 
     write(*,'(a)') 'mach,alt_kft,sensor_fov_deg,'// &
                    'ingress_hr,egress_hr,mission_hr,total_endurance_hr,'// &
-                   'mission_patch_nmi2,mission_patches,'// &
-                   'airframe_cost_m,sensor_cost_m,total_cost_m'
+                   'mission_patch_nmi2,mission_patches,total_route_nmi,total_route_hr,'// &
+                   'airframe_cost_m,sensor_cost_m,total_cost_m,'// &
+                   'mission_reps,avg_mission_patch_revisit_hr'
     do mach_ii=40,90
         mach = real(mach_ii,dp)/100.0_dp
         do alt_ii=5,25
@@ -112,12 +117,15 @@ implicit none
                 sensor_cost_m = sensor_cost_m_list(fov_ii)
                 total_cost_m = airframe_cost_m + sensor_cost_m
                 call calc_patches(mach, alt_kft, fov_deg*0.5_dp, fov_deg*0.5_dp, 0.0_dp, 0.0_dp, &
-                                  mission_width_nmi, mission_height_nmi, &
-                                  mission_patch_nmi2, mission_patches, total_route_nmi)
+                                  mission_width_nmi, mission_length_nmi, &
+                                  mission_patch_nmi2, mission_patches, mission_route_nmi, mission_route_hr)
+                mission_reps = mission_time_hr/mission_route_hr
+                avg_mission_patch_revisit_hr = mission_reps/mission_time_hr ! does this seem reasonable, check...
                 write(*,'(e13.6,11(",",e13.6))') mach, alt_kft, fov_deg, &
                                                  ingress_time_hr, egress_time_hr, mission_time_hr, total_endurance_hr, &
-                                                 mission_patch_nmi2, mission_patches, &
-                                                 airframe_cost_m, sensor_cost_m, total_cost_m
+                                                 mission_patch_nmi2, mission_patches, mission_route_nmi, mission_route_hr, &
+                                                 airframe_cost_m, sensor_cost_m, total_cost_m, &
+                                                 mission_reps, avg_mission_patch_revisit_hr
             end do
         end do
     end do
