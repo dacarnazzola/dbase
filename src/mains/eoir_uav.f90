@@ -78,7 +78,8 @@ contains
         nrow = ceiling(mission_length_nmi/patch_length_nmi) ! round up for 100% coverage in length
         ncol = ceiling(mission_width_nmi/patch_width_nmi) ! round up for 100% coverage in width
         mission_patches = nrow*ncol ! area = length * width
-        total_route_nmi = -9999999.999999 !! implement this
+        total_route_nmi = min(nrow*(ncol-1)*patch_width_nmi+(nrow-1)*sqrt(((ncol-1)*patch_width_nmi)**2+patch_length_nmi**2), &
+                              ncol*(nrow-1)*patch_length_nmi+(ncol-1)*sqrt(((nrow-1)*patch_length_nmi)**2+patch_width_nmi**2))
         total_route_hr = leg_hr(total_route_nmi, mach, alt_kft)
     end subroutine calc_patches
 
@@ -121,11 +122,12 @@ implicit none
                                   mission_patch_nmi2, mission_patches, mission_route_nmi, mission_route_hr)
                 mission_reps = mission_time_hr/mission_route_hr
                 avg_mission_patch_revisit_hr = mission_reps/mission_time_hr ! does this seem reasonable, check...
-                write(*,'(e13.6,11(",",e13.6))') mach, alt_kft, fov_deg, &
-                                                 ingress_time_hr, egress_time_hr, mission_time_hr, total_endurance_hr, &
-                                                 mission_patch_nmi2, mission_patches, mission_route_nmi, mission_route_hr, &
-                                                 airframe_cost_m, sensor_cost_m, total_cost_m, &
-                                                 mission_reps, avg_mission_patch_revisit_hr
+                write(*,'(e13.6,7(",",e13.6),",",i0,7(",",e13.6))') &
+                                                        mach, alt_kft, fov_deg, &
+                                                        ingress_time_hr, egress_time_hr, mission_time_hr, total_endurance_hr, &
+                                                        mission_patch_nmi2, mission_patches, mission_route_nmi, mission_route_hr, &
+                                                        airframe_cost_m, sensor_cost_m, total_cost_m, &
+                                                        mission_reps, avg_mission_patch_revisit_hr
             end do
         end do
     end do
