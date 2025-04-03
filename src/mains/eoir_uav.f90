@@ -78,8 +78,9 @@ contains
         nrow = ceiling(mission_length_nmi/patch_length_nmi) ! round up for 100% coverage in length
         ncol = ceiling(mission_width_nmi/patch_width_nmi) ! round up for 100% coverage in width
         mission_patches = nrow*ncol ! area = length * width
-        total_route_nmi = min(nrow*(ncol-1)*patch_width_nmi+(nrow-1)*sqrt(((ncol-1)*patch_width_nmi)**2+patch_length_nmi**2), &
-                              ncol*(nrow-1)*patch_length_nmi+(ncol-1)*sqrt(((nrow-1)*patch_length_nmi)**2+patch_width_nmi**2))
+        total_route_nmi = min(nrow*(ncol - 1)*patch_width_nmi + (nrow - 1)*patch_length_nmi, &
+                              ncol*(nrow - 1)*patch_length_nmi + (ncol - 1)*patch_width_nmi) + &
+                              0.5_dp*(patch_width_nmi + patch_length_nmi) !! add half of the patch length and width for entry/exit to pattern
         total_route_hr = leg_hr(total_route_nmi, mach, alt_kft)
     end subroutine calc_patches
 
@@ -101,7 +102,7 @@ implicit none
 
     write(*,'(a)') 'mach,alt_kft,sensor_fov_deg,'// &
                    'ingress_hr,egress_hr,mission_hr,total_endurance_hr,'// &
-                   'mission_patch_nmi2,mission_patches,total_route_nmi,total_route_hr,'// &
+                   'mission_patch_nmi2,mission_patches,mission_route_nmi,mission_route_hr,'// &
                    'airframe_cost_m,sensor_cost_m,total_cost_m,'// &
                    'mission_reps,avg_mission_patch_revisit_hr'
     do mach_ii=40,90
