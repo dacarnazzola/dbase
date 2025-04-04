@@ -63,27 +63,43 @@ contains
     end function leg_hr
 
     pure elemental subroutine calc_patches(mach, alt_kft, fov_az_hw_deg, fov_el_hw_deg, az_center_deg, el_center_deg, &
-                                           mission_width_nmi, mission_length_nmi, &
-                                           patch_area_nmi2, mission_patches, total_route_nmi, total_route_hr)
+                                           mission_width_nmi, mission_length_nmi, platform_mission_time_hr, &
+                                           patch_area_nmi2, min_platforms_required, platform_route_nmi, platform_route_hr)
         real(dp), intent(in) :: mach, alt_kft, fov_az_hw_deg, fov_el_hw_deg, az_center_deg, el_center_deg, &
-                                mission_width_nmi, mission_length_nmi
+                                mission_width_nmi, mission_length_nmi, platform_mission_time_hr
         real(dp), intent(out) :: patch_area_nmi2
-        integer, intent(out) :: mission_patches
-        real(dp), intent(out) :: total_route_nmi, total_route_hr
-        real(dp) :: patch_width_nmi, patch_length_nmi
-        integer :: nrow, ncol
+        integer, intent(out) :: min_platforms_required
+        real(dp), intent(out) :: platform_route_nmi, platform_route_hr
+        real(dp) :: patch_width_nmi, patch_length_nmi, min_strip_length_nmi, min_strip_time_hr, strip_area_nmi2, mission_area_nmi2
+        integer :: nrow, min_strips_required
         call debug_error_condition(.not.(nearly(az_center_deg, 0.0_dp) .and. nearly(el_center_deg, 0.0_dp)), &
                                    'module EOIR_UAV_MOD :: function patch_area_nmi2 only implemented for pure lookdown case')
-        patch_width_nmi = alt_kft*1000.0_dp*ft2nmi_dp*tan(fov_az_hw_deg*deg2rad_dp)*2.0_dp
         patch_length_nmi = alt_kft*1000.0_dp*ft2nmi_dp*tan(fov_el_hw_deg*deg2rad_dp)*2.0_dp
-        patch_area_nmi2 = patch_length_nmi*patch_width_nmi ! area = length * width
+        patch_width_nmi = alt_kft*1000.0_dp*ft2nmi_dp*tan(fov_az_hw_deg*deg2rad_dp)*2.0_dp
+        patch_area_nmi2 = patch_length_nmi*patch_width_nmi
         nrow = ceiling(mission_length_nmi/patch_length_nmi) ! round up for 100% coverage in length
-        ncol = ceiling(mission_width_nmi/patch_width_nmi) ! round up for 100% coverage in width
-        mission_patches = nrow*ncol ! area = length * width
-        total_route_nmi = min(nrow*(ncol - 1)*patch_width_nmi + (nrow - 1)*patch_length_nmi, &
-                              ncol*(nrow - 1)*patch_length_nmi + (ncol - 1)*patch_width_nmi) + &
-                              0.5_dp*(patch_width_nmi + patch_length_nmi) !! add half of the patch length and width for entry/exit to pattern
-        total_route_hr = leg_hr(total_route_nmi, mach, alt_kft)
+        !! platform must return to mission area starting side
+        !! minimum mission would be: entry to mission area, nrow-1 patches, patch_width_nmi, nrow-1 patches, exit mission area
+        min_strip_length_nmi = patch_length_nmi*(2*nrow - 1) + patch_width_nmi
+        min_strip_time_hr = leg_hr(min_strip_length_nmi, mach, alt_kft)
+        if (min_strip_time_hr < platform_mission_time_hr) then !! valid configuration, proceed to determine min_platforms_required, platform_route_nmi, and platform_route_hr
+            strip_area_nmi2 = patch_area_nmi2*(2*nrow) ! each strip returns platform to mission entry side
+            min_platforms_required = 0
+            platform_route_hr = huge(1.0_dp)
+            do while (platform_route_hr > platform_mission_time_hr)
+                min_platforms_required = min_platforms_required + 1
+                mission_area_nmi2 = mission_length_nmi*mission_width_nmi/min_platforms_required ! area per platform = length * width / platforms
+                min_strips_required = ceiling(mission_area_nmi2/strip_area_nmi2) ! round up for 100% coverage in width
+                platform_route_nmi = patch_length_nmi + & ! entry and exit from mission area
+                                     (2*(nrow - 1)*patch_length_nmi + patch_width_nmi)*min_strips_required + & ! individual strip length
+                                     patch_width_nmi*(min_strips_required - 1) ! movement between strips
+                platform_route_hr = leg_hr(platform_route_nmi, mach, alt_kft)
+            end do
+        else !! invalid configuration, set primary metrics to -1 and exit
+            min_platforms_required = -1
+            platform_route_nmi = -1.0_dp
+            platform_route_hr = -1.0_dp
+        end if
     end subroutine calc_patches
 
 end module eoir_uav_mod
@@ -99,12 +115,14 @@ implicit none
                            fov_deg_list(*) = [15.0_dp, 30.0_dp, 60.0_dp], sensor_cost_m_list(*) = [0.05_dp, 1.0_dp, 10.0_dp], &
                            min_mach = 0.40_dp, max_mach = 0.90_dp, min_alt_kft = 5.0_dp, max_alt_kft = 25.0_dp
 
-    integer :: mach_ii, alt_ii, fov_ii, mission_patches, fid, c_ii
-    real(dp) :: mach, alt_kft, fov_deg, total_endurance_hr, ingress_time_hr, egress_time_hr, mission_time_hr, &
-                mission_patch_nmi2, airframe_cost_m, sensor_cost_m, total_cost_m, mission_route_nmi, mission_route_hr, &
+    integer :: mach_ii, alt_ii, fov_ii, fid, c_ii, min_platforms_required
+    real(dp) :: mach, alt_kft, fov_deg, platform_endurance_hr, platform_ingress_time_hr, platform_egress_time_hr, &
+                platform_mission_time_hr, &
+                platform_mission_patch_nmi2, airframe_cost_m, sensor_cost_m, platform_cost_m, &
+                platform_mission_route_nmi, platform_mission_route_hr, &
                 mission_reps, mission_reps_per_cost_m, mission_reps_per_hour, mission_reps_per_hour_per_cost_m, &
-                mission_one_rep_time_hr, mission_one_rep_time_hr_per_cost_m, &
-                mach_list(mach_list_size), alt_list(alt_list_size), results(29,mach_list_size*alt_list_size*size(fov_deg_list)), &
+                mission_one_rep_time_hr, cost_m_per_mission_one_rep_time_hr, total_cost_m, &
+                mach_list(mach_list_size), alt_list(alt_list_size), results(30,mach_list_size*alt_list_size*size(fov_deg_list)), &
                 absolute_performance_weight, efficiency_weight, total_weight
     character(len=128) :: fmt_str
 
@@ -127,72 +145,77 @@ implicit none
         mach = mach_list(mach_ii)
         do alt_ii=1,alt_list_size
             alt_kft = alt_list(alt_ii)
-            total_endurance_hr = endurance_hr(mach, alt_kft)
-            ingress_time_hr = leg_hr(ingress_nmi, mach, alt_kft)
-            egress_time_hr = leg_hr(egress_nmi, mach, alt_kft)
-            mission_time_hr = total_endurance_hr - ingress_time_hr - egress_time_hr
+            platform_endurance_hr = endurance_hr(mach, alt_kft)
+            platform_ingress_time_hr = leg_hr(ingress_nmi, mach, alt_kft)
+            platform_egress_time_hr = leg_hr(egress_nmi, mach, alt_kft)
+            platform_mission_time_hr = platform_endurance_hr - platform_ingress_time_hr - platform_egress_time_hr
             airframe_cost_m = cost_m(mach, alt_kft)
             do fov_ii=1,size(fov_deg_list)
                 c_ii = fov_ii + (alt_ii - 1)*size(fov_deg_list) + (mach_ii - 1)*alt_list_size*size(fov_deg_list)
                 fov_deg = fov_deg_list(fov_ii)
                 sensor_cost_m = sensor_cost_m_list(fov_ii)
-                total_cost_m = airframe_cost_m + sensor_cost_m
+                platform_cost_m = airframe_cost_m + sensor_cost_m
                 call calc_patches(mach, alt_kft, fov_deg*0.5_dp, fov_deg*0.5_dp, 0.0_dp, 0.0_dp, &
-                                  mission_width_nmi, mission_length_nmi, &
-                                  mission_patch_nmi2, mission_patches, mission_route_nmi, mission_route_hr)
-                mission_reps = mission_time_hr/mission_route_hr
+                                  mission_width_nmi, mission_length_nmi, platform_mission_time_hr, &
+                                  platform_mission_patch_nmi2, min_platforms_required, &
+                                  platform_mission_route_nmi, platform_mission_route_hr)
+                total_cost_m = platform_cost_m*min_platforms_required
+                mission_reps = platform_mission_time_hr/platform_mission_route_hr
                 mission_reps_per_cost_m = mission_reps/total_cost_m
-                mission_reps_per_hour = 1.0_dp/mission_route_hr
+                mission_reps_per_hour = 1.0_dp/platform_mission_route_hr
                 mission_reps_per_hour_per_cost_m = mission_reps_per_hour/total_cost_m
-                mission_one_rep_time_hr = ingress_time_hr + mission_route_hr + egress_time_hr
-                mission_one_rep_time_hr_per_cost_m = mission_one_rep_time_hr/total_cost_m
+                mission_one_rep_time_hr = platform_ingress_time_hr + platform_mission_route_hr + platform_egress_time_hr
+                cost_m_per_mission_one_rep_time_hr = total_cost_m/mission_one_rep_time_hr
                 !! fill results
                 results( 1,c_ii) = mach
                 results( 2,c_ii) = alt_kft
                 results( 3,c_ii) = fov_deg
-                results( 4,c_ii) = ingress_time_hr
-                results( 5,c_ii) = egress_time_hr
-                results( 6,c_ii) = mission_time_hr
-                results( 7,c_ii) = total_endurance_hr
-                results( 8,c_ii) = mission_patch_nmi2
-                results( 9,c_ii) = real(mission_patches, kind=dp)
-                results(10,c_ii) = mission_route_nmi
-                results(11,c_ii) = mission_route_hr
-                results(12,c_ii) = airframe_cost_m
-                results(13,c_ii) = sensor_cost_m
-                results(14,c_ii) = total_cost_m
-                results(15,c_ii) = mission_reps
-                results(16,c_ii) = mission_reps_per_cost_m
-                results(17,c_ii) = mission_reps_per_hour
-                results(18,c_ii) = mission_reps_per_hour_per_cost_m
-                results(19,c_ii) = mission_one_rep_time_hr
-                results(20,c_ii) = mission_one_rep_time_hr_per_cost_m
+                results( 4,c_ii) = platform_ingress_time_hr
+                results( 5,c_ii) = platform_egress_time_hr
+                results( 6,c_ii) = platform_mission_time_hr
+                results( 7,c_ii) = platform_endurance_hr
+                results( 8,c_ii) = platform_mission_patch_nmi2
+                results( 9,c_ii) = platform_mission_route_nmi
+                results(10,c_ii) = platform_mission_route_hr
+                results(11,c_ii) = airframe_cost_m
+                results(12,c_ii) = sensor_cost_m
+                results(13,c_ii) = platform_cost_m
+                results(14,c_ii) = real(min_platforms_required, kind=dp)
+                results(15,c_ii) = total_cost_m
+                results(16,c_ii) = mission_reps
+                results(17,c_ii) = mission_reps_per_cost_m
+                results(18,c_ii) = mission_reps_per_hour
+                results(19,c_ii) = mission_reps_per_hour_per_cost_m
+                results(20,c_ii) = mission_one_rep_time_hr
+                results(21,c_ii) = cost_m_per_mission_one_rep_time_hr
             end do
         end do
     end do
     !$omp end parallel do
 
-    call normalize_min_max(results(15,:), results(21,:)) !! higher = better
     call normalize_min_max(results(16,:), results(22,:)) !! higher = better
     call normalize_min_max(results(17,:), results(23,:)) !! higher = better
     call normalize_min_max(results(18,:), results(24,:)) !! higher = better
-    call normalize_min_max(results(19,:), results(25,:)); results(25,:) = 1.0_dp - results(25,:) !! lower = better
-    call normalize_min_max(results(20,:), results(26,:)); results(26,:) = 1.0_dp - results(26,:) !! lower = better
+    call normalize_min_max(results(19,:), results(25,:)) !! higher = better
+    call normalize_min_max(results(20,:), results(26,:)) !! lower = better
+    call normalize_min_max(results(21,:), results(27,:)) !! lower = better
+    results(26,:) = 1.0_dp - results(26,:)
+    results(27,:) = 1.0_dp - results(27,:)
 
-    results(27,:) = (results(21,:) + results(23,:) + results(25,:))/3.0_dp !! average absolute scores
-    results(28,:) = (results(22,:) + results(24,:) + results(26,:))/3.0_dp !! average efficiency scores
-    results(29,:) = (absolute_performance_weight*results(27,:) + efficiency_weight*results(28,:))/total_weight !! weighted average total scores
+    results(28,:) = (results(22,:) + results(24,:) + results(26,:))/3.0_dp !! average absolute scores
+    results(29,:) = (results(23,:) + results(25,:) + results(27,:))/3.0_dp !! average efficiency scores
+    results(30,:) = (absolute_performance_weight*results(28,:) + efficiency_weight*results(29,:))/total_weight !! weighted average total scores
 
     open(newunit=fid, file='/valinor/eoir-uav-trade-study.csv', action='write')
     write(fid,'(a,f0.4,a,f0.4,a)') 'mach,alt_kft,sensor_fov_deg,'// &
-                     'ingress_time_hr,egress_time_hr,mission_time_hr,total_endurance_hr,'// &
-                     'survey_patch_nmi2,survey_patches_per_mission,mission_route_nmi,mission_route_hr,'// &
-                     'airframe_cost_m,sensor_cost_m,total_cost_m,'// &
+                     'platform_ingress_time_hr,platform_egress_time_hr,platform_mission_time_hr,platform_endurance_hr,'// &
+                     'platform_survey_patch_nmi2,platform_mission_route_nmi,platform_mission_route_hr,'// &
+                     'airframe_cost_m,sensor_cost_m,platform_cost_m,min_platforms_required,total_cost_m,'// &
                      'mission_max_reps,mission_max_reps_per_cost_m,'// &
                      'mission_reps_per_hour,mission_reps_per_hour_per_cost_m,'// &
-                     'mission_one_rep_time_hr,mission_one_rep_time_hr_per_cost_m,'// &
+                     'mission_one_rep_time_hr,cost_m_per_mission_one_rep_time_hr,'// &
                      'norm_max_reps,norm_max_reps_per_cost_m,norm_reps_per_hour,norm_reps_per_hour_per_cost_m,'// &
-                     'norm_one_rep_time_hr,norm_one_rep_time_hr_per_cost_m,'// &
+                     'norm_one_rep_time_hr,norm_cost_m_per_rep_time_hr,'// &
                      'average_absolute_score',absolute_performance_weight,',average_efficiency_score',efficiency_weight, &
                      ',average_total_score'
     write(fmt_str,'(a,i0,a)') '(e22.15,',size(results,dim=2)-1,'(",",e22.15))'
