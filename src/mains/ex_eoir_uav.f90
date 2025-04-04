@@ -93,7 +93,7 @@ program main
 use, non_intrinsic :: eoir_uav_mod
 implicit none
 
-    integer, parameter :: mach_list_size = 100, alt_list_size = 100
+    integer, parameter :: mach_list_size = 183, alt_list_size = 183
     real(dp), parameter :: ingress_nmi = 100.0_dp*km2nmi_dp, egress_nmi = 100.0_dp*km2nmi_dp, &
                            mission_width_nmi = 100.0_dp*km2nmi_dp, mission_length_nmi = 100.0_dp*km2nmi_dp, &
                            fov_deg_list(*) = [15.0_dp, 30.0_dp, 60.0_dp], sensor_cost_m_list(*) = [0.05_dp, 1.0_dp, 10.0_dp], &
