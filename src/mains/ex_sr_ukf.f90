@@ -619,7 +619,7 @@ contains
 end module ukf
 
 
-program ex_ukf
+program ex_sr_ukf
 use, non_intrinsic :: ukf
 implicit none
 
@@ -802,4 +802,4 @@ implicit none
     close(end_run_stats_fid)
     close(sr_ukf_summary_fid)
 
-end program ex_ukf
+end program ex_sr_ukf

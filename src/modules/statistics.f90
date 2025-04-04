@@ -54,6 +54,13 @@ private
         module procedure :: normalize_dp
     end interface normalize
 
+    interface normalize_min_max
+        module procedure :: normalize_min_max_inplace_sp
+        module procedure :: normalize_min_max_sp
+        module procedure :: normalize_min_max_inplace_dp
+        module procedure :: normalize_min_max_dp
+    end interface normalize_min_max
+
     interface cumsum
         module procedure :: cumsum_i32
         module procedure :: cumsum_inplace_i32
@@ -72,7 +79,7 @@ private
         module procedure :: cov_weighted_dp
     end interface cov
 
-    public :: dsum, avg, geomean, std, normal_pdf, normalize, cumsum, prod, mv_normal_pdf, cov
+    public :: dsum, avg, geomean, std, normal_pdf, normalize, cumsum, prod, mv_normal_pdf, cov, normalize_min_max
 
 contains
 
@@ -429,6 +436,52 @@ contains
                                    'module STATISTICS :: normalize subroutine invalid for input with total == 0.0')
         xnorm = x/total
     end subroutine normalize_dp
+
+    pure subroutine normalize_min_max_sp(x, xnorm)
+        real(kind=sp), intent(in) :: x(:)
+        real(kind=sp), intent(out) :: xnorm(size(x, kind=i64))
+        real(kind=sp) :: xmin, xmax, xdiff
+        xmin = minval(x)
+        xmax = maxval(x)
+        call debug_error_condition(nearly(xmin, xmax), &
+                                   'module STATISTICS :: normalize_min_max subroutine invalid for input with min == max')
+        xdiff = xmax - xmin
+        xnorm = (x - xmin)/xdiff
+    end subroutine normalize_min_max_sp
+
+    pure subroutine normalize_min_max_inplace_sp(x)
+        real(kind=sp), intent(inout) :: x(:)
+        real(kind=sp) :: xmin, xmax, xdiff
+        xmin = minval(x)
+        xmax = maxval(x)
+        call debug_error_condition(nearly(xmin, xmax), &
+                                   'module STATISTICS :: normalize_min_max subroutine invalid for input with min == max')
+        xdiff = xmax - xmin
+        x = (x - xmin)/xdiff
+    end subroutine normalize_min_max_inplace_sp
+
+    pure subroutine normalize_min_max_dp(x, xnorm)
+        real(kind=dp), intent(in) :: x(:)
+        real(kind=dp), intent(out) :: xnorm(size(x, kind=i64))
+        real(kind=dp) :: xmin, xmax, xdiff
+        xmin = minval(x)
+        xmax = maxval(x)
+        call debug_error_condition(nearly(xmin, xmax), &
+                                   'module STATISTICS :: normalize_min_max subroutine invalid for input with min == max')
+        xdiff = xmax - xmin
+        xnorm = (x - xmin)/xdiff
+    end subroutine normalize_min_max_dp
+
+    pure subroutine normalize_min_max_inplace_dp(x)
+        real(kind=dp), intent(inout) :: x(:)
+        real(kind=dp) :: xmin, xmax, xdiff
+        xmin = minval(x)
+        xmax = maxval(x)
+        call debug_error_condition(nearly(xmin, xmax), &
+                                   'module STATISTICS :: normalize_min_max subroutine invalid for input with min == max')
+        xdiff = xmax - xmin
+        x = (x - xmin)/xdiff
+    end subroutine normalize_min_max_inplace_dp
 
     pure subroutine cumsum_i32(x, xcs)
         integer(kind=i32), intent(in) :: x(:)
