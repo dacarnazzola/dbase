@@ -121,7 +121,7 @@ program main
 use, non_intrinsic :: eoir_uav_mod
 implicit none
 
-    integer, parameter :: mach_list_size = 183, alt_list_size = 183
+    integer, parameter :: mach_list_size = 11, alt_list_size = 11
     real(dp), parameter :: ingress_nmi = 100.0_dp*km2nmi_dp, egress_nmi = 100.0_dp*km2nmi_dp, &
                            mission_width_nmi = 100.0_dp*km2nmi_dp, mission_length_nmi = 100.0_dp*km2nmi_dp, &
                            fov_deg_list(*) = [15.0_dp, 30.0_dp, 60.0_dp], sensor_cost_m_list(*) = [0.05_dp, 1.0_dp, 10.0_dp], &
@@ -214,8 +214,8 @@ implicit none
     call normalize_min_max(results(18,:), results(26,:)) !! higher = better
     call normalize_min_max(results(19,:), results(27,:)) !! higher = better
     call normalize_min_max(results(20,:), results(28,:)) !! lower = better
-    call normalize_min_max(results(21,:), results(29,:)) !! lower = better
     results(28,:) = 1.0_dp - results(28,:)
+    call normalize_min_max(results(21,:), results(29,:)) !! lower = better
     results(29,:) = 1.0_dp - results(29,:)
     call normalize_min_max(results(22,:), results(30,:)) !! higher = better
     call normalize_min_max(results(23,:), results(31,:)) !! higher = better
