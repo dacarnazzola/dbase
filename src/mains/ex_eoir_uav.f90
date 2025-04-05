@@ -53,7 +53,7 @@ contains
         real(dp) :: T_R_at_alt, y_at_alt
         T_R_at_alt = t_alt(alt_ft)
         y_at_alt = imperfect_gamma(T_R_at_alt)
-        val = sqrt(y_at_alt*R_air*T_R_at_alt)
+        val = sqrt(y_at_alt*R_air*T_R_at_alt) ! ft/sec
     end function mach1
 
     pure elemental function leg_hr(leg_nmi, mach, alt_kft) result(val)
@@ -64,12 +64,13 @@ contains
 
     pure elemental subroutine calc_patches(mach, alt_kft, fov_az_hw_deg, fov_el_hw_deg, az_center_deg, el_center_deg, &
                                            mission_width_nmi, mission_length_nmi, platform_mission_time_hr, &
-                                           patch_area_nmi2, min_platforms_required, platform_route_nmi, platform_route_hr)
+                                           patch_area_nmi2, min_platforms_required, platform_max_survey_area_nmi2, &
+                                           platform_route_nmi, platform_route_hr)
         real(dp), intent(in) :: mach, alt_kft, fov_az_hw_deg, fov_el_hw_deg, az_center_deg, el_center_deg, &
                                 mission_width_nmi, mission_length_nmi, platform_mission_time_hr
         real(dp), intent(out) :: patch_area_nmi2
         integer, intent(out) :: min_platforms_required
-        real(dp), intent(out) :: platform_route_nmi, platform_route_hr
+        real(dp), intent(out) :: platform_max_survey_area_nmi2, platform_route_nmi, platform_route_hr
         real(dp) :: patch_width_nmi, patch_length_nmi, min_strip_length_nmi, min_strip_time_hr, strip_area_nmi2, mission_area_nmi2
         integer :: nrow, min_strips_required
         call debug_error_condition(.not.(nearly(az_center_deg, 0.0_dp) .and. nearly(el_center_deg, 0.0_dp)), &
@@ -79,8 +80,14 @@ contains
         patch_area_nmi2 = patch_length_nmi*patch_width_nmi
         nrow = ceiling(mission_length_nmi/patch_length_nmi) ! round up for 100% coverage in length
         !! platform must return to mission area starting side
-        !! minimum mission would be: entry to mission area, nrow-1 patches, patch_width_nmi, nrow-1 patches, exit mission area
-        min_strip_length_nmi = patch_length_nmi*(2*nrow - 1) + patch_width_nmi
+        !! minimum mission would be: entry to mission area 0.5*patch_length_nmi
+        !!                           fly nrow-1 patches (n-1)*patch_length_nmi
+        !!                           fly laterally patch_width_nmi
+        !!                           fly nrow-1 patches (n-1)*patch_length_nmi
+        !!                           exit mission area 0.5*patch_length_nmi
+        min_strip_length_nmi = 0.5_dp*patch_length_nmi + & ! entry to mission area
+                               (nrow-1)*patch_length_nmi + patch_width_nmi + (nrow-1)*patch_length_nmi + & ! down mission_length_nmi, over patch_width_nmi, and back mission_length_nmi
+                               0.5_dp*patch_length_nmi ! exit mission area
         min_strip_time_hr = leg_hr(min_strip_length_nmi, mach, alt_kft)
         if (min_strip_time_hr < platform_mission_time_hr) then !! valid configuration, proceed to determine min_platforms_required, platform_route_nmi, and platform_route_hr
             strip_area_nmi2 = patch_area_nmi2*(2*nrow) ! each strip returns platform to mission entry side
@@ -95,10 +102,15 @@ contains
                                      patch_width_nmi*(min_strips_required - 1) ! movement between strips
                 platform_route_hr = leg_hr(platform_route_nmi, mach, alt_kft)
             end do
+            !! maximum surveyed area = patch_width_nmi * distance traveled in platform_mission_time_hr
+            platform_max_survey_area_nmi2 = patch_width_nmi*platform_mission_time_hr*3600.0_dp* &
+                                            (mach1(alt_kft*1000.0_dp)*mach*ft2nmi_dp)
         else !! invalid configuration, set primary metrics to -1 and exit
+            call debug_error_condition(.true., 'invalid configuration scoring not implemented')
             min_platforms_required = -1
             platform_route_nmi = -1.0_dp
             platform_route_hr = -1.0_dp
+            platform_max_survey_area_nmi2 = -1.0_dp
         end if
     end subroutine calc_patches
 
@@ -119,10 +131,11 @@ implicit none
     real(dp) :: mach, alt_kft, fov_deg, platform_endurance_hr, platform_ingress_time_hr, platform_egress_time_hr, &
                 platform_mission_time_hr, &
                 platform_mission_patch_nmi2, airframe_cost_m, sensor_cost_m, platform_cost_m, &
-                platform_mission_route_nmi, platform_mission_route_hr, &
+                platform_mission_route_nmi, platform_mission_route_hr, platform_max_survey_area_nmi2, &
+                platform_max_survey_area_nmi2_per_cost_m, &
                 mission_reps, mission_reps_per_cost_m, mission_reps_per_hour, mission_reps_per_hour_per_cost_m, &
                 mission_one_rep_time_hr, cost_m_per_mission_one_rep_time_hr, total_cost_m, &
-                mach_list(mach_list_size), alt_list(alt_list_size), results(30,mach_list_size*alt_list_size*size(fov_deg_list)), &
+                mach_list(mach_list_size), alt_list(alt_list_size), results(34,mach_list_size*alt_list_size*size(fov_deg_list)), &
                 absolute_performance_weight, efficiency_weight, total_weight
     character(len=128) :: fmt_str
 
@@ -157,7 +170,7 @@ implicit none
                 platform_cost_m = airframe_cost_m + sensor_cost_m
                 call calc_patches(mach, alt_kft, fov_deg*0.5_dp, fov_deg*0.5_dp, 0.0_dp, 0.0_dp, &
                                   mission_width_nmi, mission_length_nmi, platform_mission_time_hr, &
-                                  platform_mission_patch_nmi2, min_platforms_required, &
+                                  platform_mission_patch_nmi2, min_platforms_required, platform_max_survey_area_nmi2, &
                                   platform_mission_route_nmi, platform_mission_route_hr)
                 total_cost_m = platform_cost_m*min_platforms_required
                 mission_reps = platform_mission_time_hr/platform_mission_route_hr
@@ -166,6 +179,7 @@ implicit none
                 mission_reps_per_hour_per_cost_m = mission_reps_per_hour/total_cost_m
                 mission_one_rep_time_hr = platform_ingress_time_hr + platform_mission_route_hr + platform_egress_time_hr
                 cost_m_per_mission_one_rep_time_hr = total_cost_m/mission_one_rep_time_hr
+                platform_max_survey_area_nmi2_per_cost_m = platform_max_survey_area_nmi2/total_cost_m
                 !! fill results
                 results( 1,c_ii) = mach
                 results( 2,c_ii) = alt_kft
@@ -188,23 +202,27 @@ implicit none
                 results(19,c_ii) = mission_reps_per_hour_per_cost_m
                 results(20,c_ii) = mission_one_rep_time_hr
                 results(21,c_ii) = cost_m_per_mission_one_rep_time_hr
+                results(22,c_ii) = platform_max_survey_area_nmi2
+                results(23,c_ii) = platform_max_survey_area_nmi2_per_cost_m
             end do
         end do
     end do
     !$omp end parallel do
 
-    call normalize_min_max(results(16,:), results(22,:)) !! higher = better
-    call normalize_min_max(results(17,:), results(23,:)) !! higher = better
-    call normalize_min_max(results(18,:), results(24,:)) !! higher = better
-    call normalize_min_max(results(19,:), results(25,:)) !! higher = better
-    call normalize_min_max(results(20,:), results(26,:)) !! lower = better
-    call normalize_min_max(results(21,:), results(27,:)) !! lower = better
-    results(26,:) = 1.0_dp - results(26,:)
-    results(27,:) = 1.0_dp - results(27,:)
+    call normalize_min_max(results(16,:), results(24,:)) !! higher = better
+    call normalize_min_max(results(17,:), results(25,:)) !! higher = better
+    call normalize_min_max(results(18,:), results(26,:)) !! higher = better
+    call normalize_min_max(results(19,:), results(27,:)) !! higher = better
+    call normalize_min_max(results(20,:), results(28,:)) !! lower = better
+    call normalize_min_max(results(21,:), results(29,:)) !! lower = better
+    results(28,:) = 1.0_dp - results(28,:)
+    results(29,:) = 1.0_dp - results(29,:)
+    call normalize_min_max(results(22,:), results(30,:)) !! higher = better
+    call normalize_min_max(results(23,:), results(31,:)) !! higher = better
 
-    results(28,:) = (results(22,:) + results(24,:) + results(26,:))/3.0_dp !! average absolute scores
-    results(29,:) = (results(23,:) + results(25,:) + results(27,:))/3.0_dp !! average efficiency scores
-    results(30,:) = (absolute_performance_weight*results(28,:) + efficiency_weight*results(29,:))/total_weight !! weighted average total scores
+    results(32,:) = (results(24,:) + results(26,:) + results(28,:) + results(30,:))/4.0_dp !! average absolute scores
+    results(33,:) = (results(25,:) + results(27,:) + results(29,:) + results(31,:))/4.0_dp !! average efficiency scores
+    results(34,:) = (absolute_performance_weight*results(32,:) + efficiency_weight*results(33,:))/total_weight !! weighted average total scores
 
     open(newunit=fid, file='/valinor/eoir-uav-trade-study.csv', action='write')
     write(fid,'(a,f0.4,a,f0.4,a)') 'mach,alt_kft,sensor_fov_deg,'// &
@@ -214,11 +232,13 @@ implicit none
                      'mission_max_reps,mission_max_reps_per_cost_m,'// &
                      'mission_reps_per_hour,mission_reps_per_hour_per_cost_m,'// &
                      'mission_one_rep_time_hr,cost_m_per_mission_one_rep_time_hr,'// &
+                     'platform_max_survey_area_nmi2,platform_max_survey_area_nmi2_per_cost_m,'// &
                      'norm_max_reps,norm_max_reps_per_cost_m,norm_reps_per_hour,norm_reps_per_hour_per_cost_m,'// &
                      'norm_one_rep_time_hr,norm_cost_m_per_rep_time_hr,'// &
+                     'norm_platform_max_survey_area_nmi2,norm_platform_max_survey_area_nmi2_per_cost_m,'// &
                      'average_absolute_score',absolute_performance_weight,',average_efficiency_score',efficiency_weight, &
                      ',average_total_score'
-    write(fmt_str,'(a,i0,a)') '(e22.15,',size(results,dim=2)-1,'(",",e22.15))'
+    write(fmt_str,'(a,i0,a)') '(e22.15,',size(results,dim=1)-1,'(",",e22.15))'
     do c_ii=1,size(results,dim=2)
         write(unit=fid, fmt=fmt_str) results(:,c_ii)
     end do
