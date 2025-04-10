@@ -121,7 +121,7 @@ program main
 use, non_intrinsic :: eoir_uav_mod
 implicit none
 
-    integer, parameter :: mach_list_size = 201, alt_list_size = 201
+    integer, parameter :: mach_list_size = 11, alt_list_size = 11
     real(dp), parameter :: ingress_nmi = 100.0_dp*km2nmi_dp, egress_nmi = 100.0_dp*km2nmi_dp, &
                            mission_width_nmi = 100.0_dp*km2nmi_dp, mission_length_nmi = 100.0_dp*km2nmi_dp, &
                            fov_deg_list(*) = [15.0_dp, 30.0_dp, 60.0_dp], sensor_cost_m_list(*) = [0.05_dp, 1.0_dp, 10.0_dp], &
@@ -135,7 +135,7 @@ implicit none
                 max_total_survey_area_nmi2_per_cost_m, &
                 mission_reps, mission_reps_per_cost_m, mission_reps_per_hour, mission_reps_per_hour_per_cost_m, &
                 mission_one_rep_time_hr, cost_m_per_mission_one_rep_time_hr, total_cost_m, &
-                mach_list(mach_list_size), alt_list(alt_list_size), results(35,mach_list_size*alt_list_size*size(fov_deg_list)), &
+                mach_list(mach_list_size), alt_list(alt_list_size), results(37,mach_list_size*alt_list_size*size(fov_deg_list)), &
                 absolute_performance_weight, efficiency_weight, total_weight
     character(len=128) :: fmt_str
 
@@ -196,40 +196,48 @@ implicit none
                 results(13,c_ii) = platform_cost_m
                 results(14,c_ii) = real(min_platforms_required, kind=dp)
                 results(15,c_ii) = total_cost_m
-                results(16,c_ii) = mission_reps
-                results(17,c_ii) = mission_reps_per_cost_m
-                results(18,c_ii) = mission_reps_per_hour
-                results(19,c_ii) = mission_reps_per_hour_per_cost_m
-                results(20,c_ii) = mission_one_rep_time_hr
-                results(21,c_ii) = cost_m_per_mission_one_rep_time_hr
-                results(22,c_ii) = max_total_survey_area_nmi2
-                results(23,c_ii) = max_total_survey_area_nmi2_per_cost_m
-                results(35,c_ii) = sqrt(total_cost_m**2 + mission_one_rep_time_hr**2)
+                !! results(16,c_ii) = norm_total_cost_m
+                results(17,c_ii) = mission_reps
+                results(18,c_ii) = mission_reps_per_cost_m
+                results(19,c_ii) = mission_reps_per_hour
+                results(20,c_ii) = mission_reps_per_hour_per_cost_m
+                results(21,c_ii) = mission_one_rep_time_hr
+                results(22,c_ii) = cost_m_per_mission_one_rep_time_hr
+                results(23,c_ii) = max_total_survey_area_nmi2
+                results(24,c_ii) = max_total_survey_area_nmi2_per_cost_m
+                results(36,c_ii) = sqrt(total_cost_m**2 + mission_one_rep_time_hr**2)
             end do
         end do
     end do
     !$omp end parallel do
 
-    call normalize_min_max(results(16,:), results(24,:)) !! higher = better
-    call normalize_min_max(results(17,:), results(25,:)) !! higher = better
-    call normalize_min_max(results(18,:), results(26,:)) !! higher = better
-    call normalize_min_max(results(19,:), results(27,:)) !! higher = better
-    call normalize_min_max(results(20,:), results(28,:)) !! lower = better
-    results(28,:) = 1.0_dp - results(28,:)
-    call normalize_min_max(results(21,:), results(29,:)) !! lower = better
-    results(29,:) = 1.0_dp - results(29,:)
-    call normalize_min_max(results(22,:), results(30,:)) !! higher = better
-    call normalize_min_max(results(23,:), results(31,:)) !! higher = better
+    call normalize_min_max(results(15,:), results(16,:)) !! lower = better, total_cost_m
 
-    results(32,:) = (results(24,:) + results(26,:) + results(28,:) + results(30,:))/4.0_dp !! average absolute scores
-    results(33,:) = (results(25,:) + results(27,:) + results(29,:) + results(31,:))/4.0_dp !! average efficiency scores
-    results(34,:) = (absolute_performance_weight*results(32,:) + efficiency_weight*results(33,:))/total_weight !! weighted average total scores
+    call normalize_min_max(results(17,:), results(25,:)) !! higher = better, mission_reps
+    call normalize_min_max(results(18,:), results(26,:)) !! higher = better, mission_reps_per_cost_m
+    call normalize_min_max(results(19,:), results(27,:)) !! higher = better, mission_reps_per_hour
+    call normalize_min_max(results(20,:), results(28,:)) !! higher = better, mission_reps_per_hour_per_cost_m
+
+    call normalize_min_max(results(21,:), results(29,:)) !! lower = better, mission_one_rep_time_hr
+    results(37,:) = sqrt(results(16,:)**2 + results(29,:)**2) !! RSS normalized total_cost_m and normalized mission_one_rep_time_hr to compare differing scales of values (cost ($M) and time (hr))
+
+    results(29,:) = 1.0_dp - results(29,:) !! flip 0-1 so lower=better can be averaged with other higher=better scores
+
+    call normalize_min_max(results(22,:), results(30,:)) !! lower = better, cost_m_per_mission_one_rep_time_hr
+    results(30,:) = 1.0_dp - results(30,:) !! flip 0-1 so lower=better can be averaged with other higher=better scores
+
+    call normalize_min_max(results(23,:), results(31,:)) !! higher = better, max_total_survey_area_nmi2
+    call normalize_min_max(results(24,:), results(32,:)) !! higher = better, max_total_survey_area_nmi2_per_cost_m
+
+    results(33,:) = (results(25,:) + results(27,:) + results(29,:) + results(31,:))/4.0_dp !! average absolute scores
+    results(34,:) = (results(26,:) + results(28,:) + results(30,:) + results(32,:))/4.0_dp !! average efficiency scores
+    results(35,:) = (absolute_performance_weight*results(33,:) + efficiency_weight*results(34,:))/total_weight !! weighted average total scores
 
     open(newunit=fid, file='/valinor/eoir-uav-trade-study.csv', action='write')
     write(fid,'(a,f0.4,a,f0.4,a)') 'mach,alt_kft,sensor_fov_deg,'// &
                      'platform_ingress_time_hr,platform_egress_time_hr,platform_mission_time_hr,platform_endurance_hr,'// &
                      'platform_survey_patch_nmi2,platform_mission_route_nmi,platform_mission_route_hr,'// &
-                     'airframe_cost_m,sensor_cost_m,platform_cost_m,min_platforms_required,total_cost_m,'// &
+                     'airframe_cost_m,sensor_cost_m,platform_cost_m,min_platforms_required,total_cost_m,norm_total_cost_m,'// &
                      'mission_max_reps,mission_max_reps_per_cost_m,'// &
                      'mission_reps_per_hour,mission_reps_per_hour_per_cost_m,'// &
                      'mission_one_rep_time_hr,cost_m_per_mission_one_rep_time_hr,'// &
@@ -238,7 +246,7 @@ implicit none
                      'norm_one_rep_time_hr,norm_cost_m_per_rep_time_hr,'// &
                      'norm_max_total_survey_area_nmi2,norm_max_total_survey_area_nmi2_per_cost_m,'// &
                      'average_absolute_score',absolute_performance_weight,',average_efficiency_score',efficiency_weight, &
-                     ',average_total_score,rss_cost_one_rep_time'
+                     ',average_total_score,rss_cost_one_rep_time,rss_norm_cost_norm_one_rep_time'
     write(fmt_str,'(a,i0,a)') '(e22.15,',size(results,dim=1)-1,'(",",e22.15))'
     do c_ii=1,size(results,dim=2)
         write(unit=fid, fmt=fmt_str) results(:,c_ii)

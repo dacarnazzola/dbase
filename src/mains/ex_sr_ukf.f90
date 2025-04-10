@@ -598,9 +598,11 @@ contains
                                                   tru_pol, trk_pol, trk_err_pol
     end
 
-    impure subroutine dump_summary(fid, reps, model_ii, filter_noise, init_sig_scale, init_sig, meas_sig, se_err, se_err_pol)
+    impure subroutine dump_summary(fid, reps, model_ii, filter_noise, init_sig_scale, init_sig, meas_sig, se_err, se_err_pol, &
+                                   ut_alpha, ut_lambda, ut_kappa)
         integer, intent(in) :: fid, reps, model_ii
-        real(dp), intent(in) :: filter_noise, init_sig_scale, init_sig(4), meas_sig(4), se_err(:,:), se_err_pol(:,:)
+        real(dp), intent(in) :: filter_noise, init_sig_scale, init_sig(4), meas_sig(4), se_err(:,:), se_err_pol(:,:), ut_alpha, &
+                                ut_lambda, ut_kappa
         real(dp) :: rmse_state(size(se_err,dim=1)), rmse_pol(size(se_err_pol,dim=1))
         integer :: i
         call debug_error_condition(size(se_err,dim=1) /= 9, 'se_err should have 9 rows')
@@ -612,8 +614,8 @@ contains
         do concurrent (i=1:size(rmse_pol))
             rmse_pol(i) = rmse(se_err_pol(i,:), 0.0_dp)
         end do
-        write(unit=fid, fmt='(i0,",",i0,24(",",e13.6))') reps, model_ii, filter_noise, init_sig_scale, init_sig, &
-                                                         meas_sig, rmse_state, rmse_pol
+        write(unit=fid, fmt='(i0,",",i0,27(",",e13.6))') reps, model_ii, filter_noise, init_sig_scale, init_sig, &
+                                                         meas_sig, rmse_state, rmse_pol, ut_alpha, ut_lambda, ut_kappa
     end
 
 end module ukf
@@ -625,9 +627,9 @@ implicit none
 
     logical, parameter :: debug(*) = [.false., & !! 1, per-observation
                                       .false., & !! 2, per-trial
-                                      .true., & !! 3, all-trial summary
+                                      .false., & !! 3, all-trial summary
                                       .false., & !! 4, per-observation output to file
-                                      .true., & !! 5, per-trial output to file
+                                      .false., & !! 5, per-trial output to file
                                       .true.] !! 6, all-trial summary output to file
     real(dp), parameter :: dt = 1.0_dp
     integer, parameter :: max_trials = 1024
@@ -635,38 +637,52 @@ implicit none
     real(dp), parameter :: meas_sig2_list(*) = [-1.0_dp, 0.01_dp*deg2rad_dp, 0.1_dp*deg2rad_dp, deg2rad_dp, 5.0_dp*deg2rad_dp]
     real(dp), parameter :: meas_sig3_list(*) = [-1.0_dp, 0.1_dp, 10.0_dp, 100.0_dp, 200.0_dp]
     real(dp), parameter :: meas_sig4_list(*) = [-1.0_dp, 0.001_dp*deg2rad_dp, 0.01_dp*deg2rad_dp, 0.1_dp*deg2rad_dp]
-    real(dp), parameter :: init_scale_list(*) = [1.0_dp, 1.5_dp, 2.0_dp, 2.5_dp, 3.0_dp]
+    real(dp), parameter :: init_scale_list(*) = [1.0_dp, 1.5_dp, 2.0_dp, 2.5_dp, 3.0_dp, 3.5_dp, 4.0_dp, 4.5_dp, 5.0_dp, 5.5_dp, &
+                                                 6.0_dp, 6.5_dp, 7.0_dp, 7.5_dp, 8.0_dp, 8.5_dp, 9.0_dp]
     real(dp), parameter :: noise_list(*) = [0.01_dp/g, 0.01_dp, 0.1_dp, 1.0_dp, 2.0_dp, 3.0_dp, 4.0_dp, 5.0_dp, 6.0_dp, 9.0_dp]*g
+    real(dp), parameter :: ut_alpha_list(*) = [0.001_dp, 0.002_dp, 0.003_dp, 0.004_dp, 0.005_dp, 0.006_dp, 0.007_dp, 0.008_dp, &
+                                               0.009_dp, 0.01_dp, 0.02_dp, 0.03_dp, 0.04_dp, 0.05_dp, 0.06_dp, 0.07_dp, 0.08_dp, &
+                                               0.09_dp, 0.1_dp, 0.2_dp, 0.3_dp, 0.4_dp, 0.5_dp, 0.6_dp, 0.7_dp, 0.8_dp, 0.9_dp, &
+                                               1.0_dp]
+    real(dp), parameter :: ut_lambda_list(*) = [0.0_dp, 0.001_dp, 0.01_dp, 0.1_dp, 1.0_dp, 2.0_dp, 3.0_dp, 4.0_dp, 5.0_dp, 6.0_dp, &
+                                                7.0_dp, 8.0_dp, 9.0_dp, 10.0_dp]
 
     type(sr_ukf_type) :: filter
     real(dp) :: obs(6), tgt(6), meas(4), meas_sig(4), init_sig(4), t, no_opt_data(0), se_err(9,max_trials), tgt0(6), tgt_pol(4), &
-                se_err_pol(4,max_trials), trk_pol(4), noise, init_sig_scale
+                se_err_pol(4,max_trials), trk_pol(4), noise, init_sig_scale, ut_alpha, ut_lambda, ut_kappa
     procedure(dynamics_model), pointer :: state_dynamics_model
     character(len=:), allocatable :: state_dynamics_model_name
     real(dp), allocatable :: opt_data(:)
     integer :: state_model_ii, trial_ii, i, in_run_stats_fid, end_run_stats_fid, meas_sig1_ii, meas_sig2_ii, meas_sig3_ii, &
-               meas_sig4_ii, sr_ukf_summary_fid, noise_ii, init_sig1_ii, init_sig2_ii, init_sig3_ii, init_sig4_ii, init_scale_ii
+               meas_sig4_ii, sr_ukf_summary_fid, noise_ii, init_sig1_ii, init_sig2_ii, init_sig3_ii, init_sig4_ii, init_scale_ii, &
+               ut_alpha_ii, ut_lambda_ii
 
     !! observer initial conditions
     obs = 0.0_dp
 
-    open(newunit=in_run_stats_fid, file='/valinor/in-run-stats.csv', action='write')
-    write(unit=in_run_stats_fid, fmt='(a)') 'state_model_ii,t,obs_x,obs_y,obs_vx,obs_vy,obs_ax,obs_ay,tgt_x,tgt_y,tgt_vx,'// &
-                                            'tgt_vy,tgt_ax,tgt_ay,trk_x,trk_y,trk_vx,trk_vy,trk_ax,trk_ay,trk_err_x,trk_err_y,'// &
-                                            'trk_err_vx,trk_err_vy,trk_err_ax,trk_err_ay,trk_pos_err,trk_vel_err,trk_acc_err,'// &
-                                            'rng,ang,rng_rt,ang_rt,trk_rng,trk_ang,trk_rng_rt,trk_ang_rt,trk_rng_err,'// &
-                                            'trk_ang_err,trk_rng_rt_err,trk_ang_rt_err'
-    open(newunit=end_run_stats_fid, file='/valinor/end-run-stats.csv', action='write')
-    write(unit=end_run_stats_fid, fmt='(a)') 'state_model_ii,t,obs_x,obs_y,obs_vx,obs_vy,obs_ax,obs_ay,tgt_x,tgt_y,tgt_vx,'// &
-                                            'tgt_vy,tgt_ax,tgt_ay,trk_x,trk_y,trk_vx,trk_vy,trk_ax,trk_ay,trk_err_x,trk_err_y,'// &
-                                            'trk_err_vx,trk_err_vy,trk_err_ax,trk_err_ay,trk_pos_err,trk_vel_err,trk_acc_err,'// &
-                                            'rng,ang,rng_rt,ang_rt,trk_rng,trk_ang,trk_rng_rt,trk_ang_rt,trk_rng_err,'// &
-                                            'trk_ang_err,trk_rng_rt_err,trk_ang_rt_err'
-    open(newunit=sr_ukf_summary_fid, file='/valinor/sr-ukf-summary.csv', action='write')
-    write(unit=sr_ukf_summary_fid, fmt='(a)') 'reps,state_model_ii,process_noise,init_sig_scale,init_sig_rng,init_sig_ang,'// &
-                                              'init_sig_rng_rt,init_sig_ang_rt,sig_rng,sig_ang,sig_rng_rt,sig_ang_rt,rmse_x,'// &
-                                              'rmse_y,rmse_vx,rmse_vy,rmse_ax,rmse_ay,rmse_pos,rmse_vel,rmse_acc,rmse_rng,'// &
-                                              'rmse_ang,rmse_rng_rt,rmse_ang_rt'
+    if (debug(4)) then
+        open(newunit=in_run_stats_fid, file='/valinor/in-run-stats.csv', action='write')
+        write(unit=in_run_stats_fid, fmt='(a)') 'state_model_ii,t,obs_x,obs_y,obs_vx,obs_vy,obs_ax,obs_ay,tgt_x,tgt_y,tgt_vx,'// &
+                                                'tgt_vy,tgt_ax,tgt_ay,trk_x,trk_y,trk_vx,trk_vy,trk_ax,trk_ay,trk_err_x,'// &
+                                                'trk_err_y,trk_err_vx,trk_err_vy,trk_err_ax,trk_err_ay,trk_pos_err,trk_vel_err,'// &
+                                                'trk_acc_err,rng,ang,rng_rt,ang_rt,trk_rng,trk_ang,trk_rng_rt,trk_ang_rt,'// &
+                                                'trk_rng_err,trk_ang_err,trk_rng_rt_err,trk_ang_rt_err'
+    end if
+    if (debug(5)) then
+        open(newunit=end_run_stats_fid, file='/valinor/end-run-stats.csv', action='write')
+        write(unit=end_run_stats_fid, fmt='(a)') 'state_model_ii,t,obs_x,obs_y,obs_vx,obs_vy,obs_ax,obs_ay,tgt_x,tgt_y,tgt_vx,'// &
+                                                 'tgt_vy,tgt_ax,tgt_ay,trk_x,trk_y,trk_vx,trk_vy,trk_ax,trk_ay,trk_err_x,'// &
+                                                 'trk_err_y,trk_err_vx,trk_err_vy,trk_err_ax,trk_err_ay,trk_pos_err,'// &
+                                                 'trk_vel_err,trk_acc_err,rng,ang,rng_rt,ang_rt,trk_rng,trk_ang,trk_rng_rt,'// &
+                                                 'trk_ang_rt,trk_rng_err,trk_ang_err,trk_rng_rt_err,trk_ang_rt_err'
+    end if
+    if (debug(6)) then
+        open(newunit=sr_ukf_summary_fid, file='/valinor/sr-ukf-summary.csv', action='write')
+        write(unit=sr_ukf_summary_fid, fmt='(a)') 'reps,state_model_ii,process_noise,init_sig_scale,init_sig_rng,init_sig_ang,'// &
+                                                  'init_sig_rng_rt,init_sig_ang_rt,sig_rng,sig_ang,sig_rng_rt,sig_ang_rt,'// &
+                                                  'rmse_x,rmse_y,rmse_vx,rmse_vy,rmse_ax,rmse_ay,rmse_pos,rmse_vel,rmse_acc,'// &
+                                                  'rmse_rng,rmse_ang,rmse_rng_rt,rmse_ang_rt,ut_alpha,ut_lambda,ut_kappa'
+    end if
 
     do init_sig1_ii=6,6 ! 1,size(meas_sig1_list)
         init_sig(1) = meas_sig1_list(init_sig1_ii)
@@ -677,7 +693,7 @@ implicit none
         init_sig(3) = meas_sig3_list(init_sig3_ii)
     do init_sig4_ii=1,1 ! 1,size(meas_sig4_list)
         init_sig(4) = meas_sig4_list(init_sig4_ii)
-    do init_scale_ii=5,5 ! 1,size(init_scale_list)
+    do init_scale_ii=1,size(init_scale_list)
         init_sig_scale = init_scale_list(init_scale_ii)
     do meas_sig1_ii=6,6 ! 1,size(meas_sig1_list)
         meas_sig(1) = meas_sig1_list(meas_sig1_ii)
@@ -687,8 +703,13 @@ implicit none
         meas_sig(3) = meas_sig3_list(meas_sig3_ii)
     do meas_sig4_ii=1,1 ! 1,size(meas_sig4_list)
         meas_sig(4) = meas_sig4_list(meas_sig4_ii)
-    do noise_ii=10,10 ! 1,size(noise_list)
+    do noise_ii=1,4 ! 1,size(noise_list)
         noise = noise_list(noise_ii)
+    do ut_alpha_ii=1,size(ut_alpha_list)
+        ut_alpha = ut_alpha_list(ut_alpha_ii)
+    do ut_lambda_ii=1,1 ! 1,size(ut_lambda_list)
+        ut_lambda = ut_lambda_list(ut_lambda_ii)
+        ut_kappa = (6.0_dp + ut_lambda)/ut_alpha**2 - 6.0_dp
 
     do state_model_ii=3,3
         if (allocated(opt_data)) deallocate(opt_data)
@@ -720,7 +741,7 @@ implicit none
     !! generate initial measurement and initialize Square Root Unscented Kalman Filter
     t = 0.0_dp
     call generate_observation(obs, tgt, meas, init_sig)
-    call initialize_sr_ukf(obs, meas, init_sig_scale*init_sig, filter, noise=noise)
+    call initialize_sr_ukf(obs, meas, init_sig_scale*init_sig, filter, noise=noise, k=ut_kappa, a=ut_alpha)
     if (debug(1)) call print_status(t, obs, tgt, filter)
 
     do while (tgt(2) > 0.0_dp)
@@ -762,7 +783,7 @@ implicit none
 
     if (debug(6)) then
         call dump_summary(sr_ukf_summary_fid, max_trials, state_model_ii, noise, init_sig_scale, init_sig, &
-                          meas_sig, se_err, se_err_pol)
+                          meas_sig, se_err, se_err_pol, ut_alpha, ut_lambda, ut_kappa)
         flush(sr_ukf_summary_fid)
     end if
     if (debug(3)) then
@@ -786,6 +807,8 @@ implicit none
         write(*,'(a,/)') repeat('=', 32)
     end if
 
+    end do !! ut_lambda_ii
+    end do !! ut_alpha_ii
     end do !! state_model_ii
     end do !! noise_ii
     end do !! meas_sig4_ii
@@ -798,8 +821,8 @@ implicit none
     end do !! init_sig2_ii
     end do !! init_sig1_ii
 
-    close(in_run_stats_fid)
-    close(end_run_stats_fid)
-    close(sr_ukf_summary_fid)
+    if (debug(4)) close(in_run_stats_fid)
+    if (debug(5)) close(end_run_stats_fid)
+    if (debug(6)) close(sr_ukf_summary_fid)
 
 end program ex_sr_ukf
