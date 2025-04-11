@@ -413,7 +413,7 @@ contains
             end do
         end if
         chi2_0 = huge(1.0_dp)
-        do iteration=1,filter%max_iterations
+        do iteration=1,1 ! filter%max_iterations
             !! generate sigma points
             call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
             !! convert sigma_points to measurement space
@@ -845,7 +845,7 @@ implicit none
                                                1.0_dp]
     real(dp), parameter :: ut_lambda_list(*) = [0.0_dp, 0.001_dp, 0.01_dp, 0.1_dp, 1.0_dp, 2.0_dp, 3.0_dp, 4.0_dp, 5.0_dp, 6.0_dp, &
                                                 7.0_dp, 8.0_dp, 9.0_dp, 10.0_dp]
-    integer, parameter :: max_iterations_list(*) = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    integer, parameter :: max_iterations_list(*) = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 101, 128]
 
     type(sr_ukf_type) :: filter
     real(dp) :: obs(6), tgt(6), meas(4), meas_sig(4), init_sig(4), t, no_opt_data(0), se_err(9,max_trials), tgt0(6), tgt_pol(4), &
@@ -904,17 +904,17 @@ implicit none
         meas_sig(3) = meas_sig3_list(meas_sig3_ii)
     do meas_sig4_ii=1,1 ! 1,size(meas_sig4_list)
         meas_sig(4) = meas_sig4_list(meas_sig4_ii)
-    do noise_ii=1,size(noise_list)
+    do noise_ii=4,4 ! 1,size(noise_list)
         noise = noise_list(noise_ii)
     do ut_alpha_ii=28,28 ! 1,size(ut_alpha_list)
         ut_alpha = ut_alpha_list(ut_alpha_ii)
     do ut_lambda_ii=1,1 ! 1,size(ut_lambda_list)
         ut_lambda = ut_lambda_list(ut_lambda_ii)
         ut_kappa = (6.0_dp + ut_lambda)/ut_alpha**2 - 6.0_dp
-    do max_iterations_ii=1,size(max_iterations_list)
+    do max_iterations_ii=1,1 ! 1,size(max_iterations_list)
         max_iterations = max_iterations_list(max_iterations_ii)
 
-    do state_model_ii=2,3
+    do state_model_ii=3,3
         if (allocated(opt_data)) deallocate(opt_data)
         select case (state_model_ii)
             case (1)
