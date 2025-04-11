@@ -231,7 +231,7 @@ contains
             end do
         end if
         chi2_0 = huge(1.0_dp)
-        do iteration=1,filter%max_iterations
+        do iteration=1,filter%max_iterations/2
             !! generate sigma points
             call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
             !! convert sigma_points to measurement space
@@ -395,7 +395,7 @@ contains
         real(dp) :: sigma_points(6,13), sigma_points_meas(4,13), pred_meas(4), innovation(4), amat(4,19), amat_t(19,4), sqrt_wc, &
                     square_root_measurement_covariance(4,4), cross_correlation(6,4), p_xz_transpose(4,6), temp(4,6), &
                     s_z_transpose(4,4), k_t(4,6), kalman_gain(6,4), p(6,6), pzz_plus_r(4,4), y(4), chi2_0, chi2_now, chi2_diff
-        integer :: i, meas_dim, meas_ii(4), meas_index, iteration
+        integer :: i, meas_dim, meas_ii(4), meas_index, iteration, r_alpha
         !! update filter to current time
         call filter_time_update(filter, t, state_dynamics_model, opt_data)
         !! return early if measurement provides no information
@@ -450,8 +450,9 @@ contains
             do concurrent (i=2:13)
                 amat(1:meas_dim,i) = sqrt_wc*sigma_points_meas(meas_ii(1:meas_dim),i)
             end do
+            r_alpha = 1.0_dp + (iteration - 1)*0.1_dp
             do concurrent (i=1:meas_dim)
-                amat(i,13+i) = meas_sig(meas_ii(i))
+                amat(i,13+i) = meas_sig(meas_ii(i))*r_alpha
             end do
             !! calculate square root of measurement covariance
             amat_t = transpose(amat)
@@ -492,7 +493,7 @@ contains
             !! compute ||y||**2 = Chi**2 - monitor chi2 until it stops changing and is less than threshold
             chi2_now = vdot(y(1:meas_dim), y(1:meas_dim))
             chi2_diff = abs(chi2_0 - chi2_now)
-            if (chi2_diff < huge(0.01_dp)) then
+            if (chi2_diff < 0.01_dp) then
                 select case (meas_dim)
                     case (1)
                         if (chi2_now < 3.841_dp) exit
@@ -845,7 +846,7 @@ implicit none
                                                1.0_dp]
     real(dp), parameter :: ut_lambda_list(*) = [0.0_dp, 0.001_dp, 0.01_dp, 0.1_dp, 1.0_dp, 2.0_dp, 3.0_dp, 4.0_dp, 5.0_dp, 6.0_dp, &
                                                 7.0_dp, 8.0_dp, 9.0_dp, 10.0_dp]
-    integer, parameter :: max_iterations_list(*) = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 101, 128]
+    integer, parameter :: max_iterations_list(*) = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 
     type(sr_ukf_type) :: filter
     real(dp) :: obs(6), tgt(6), meas(4), meas_sig(4), init_sig(4), t, no_opt_data(0), se_err(9,max_trials), tgt0(6), tgt_pol(4), &
@@ -946,7 +947,7 @@ implicit none
 !    call generate_observation(obs, tgt, meas, init_sig)
 !    call initialize_sr_ukf(obs, meas, init_sig_scale*init_sig, filter, noise=noise, k=ut_kappa, a=ut_alpha)
     call generate_observation(obs, tgt, meas, meas_sig)
-    call initialize_sr_ukf(obs, meas, meas_sig, filter, noise=noise, k=ut_kappa, a=ut_alpha, max_iterations=max_iterations)
+    call initialize_sr_ukf(obs, meas, init_sig_scale*meas_sig, filter, noise=noise, k=ut_kappa, a=ut_alpha, max_iterations=max_iterations)
     if (debug(1)) call print_status(t, obs, tgt, filter)
 
     do while (tgt(2) > 0.0_dp)
