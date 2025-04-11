@@ -1,6 +1,6 @@
 module ukf
 use, non_intrinsic :: kinds, only: dp
-use, non_intrinsic :: constants, only: nmi2ft_dp, deg2rad_dp, eps_dp
+use, non_intrinsic :: constants, only: nmi2ft_dp, deg2rad_dp, eps_dp, rad2deg_dp
 use, non_intrinsic :: system, only: debug_error_condition, nearly
 use, non_intrinsic :: vector_math, only: vmag, vdot
 use, non_intrinsic :: matrix_math, only: chol, qr, forward_substitution, backward_substitution
@@ -27,6 +27,8 @@ private
         real(dp) :: wc_1
         real(dp) :: w_2_2n1
         real(dp) :: ut_gamma
+        !! measurement update will iterate up to max_iterations to improve state_estimate
+        integer :: max_iterations = 1
         !! state_estimate and covariance_square_root have no sensible default values
         real(dp) :: state_estimate(6)
         real(dp) :: covariance_square_root(6,6)
@@ -48,10 +50,12 @@ private
 
 contains
 
-    pure subroutine initialize_sr_ukf(obs, meas, meas_sig, filter, t, noise, max_vel, def_vel, max_acc, def_acc, k, a, b, def_rng)
+    pure subroutine initialize_sr_ukf(obs, meas, meas_sig, filter, t, noise, max_vel, def_vel, max_acc, def_acc, k, a, b, def_rng, &
+                                      max_iterations)
         real(dp), intent(in) :: obs(6), meas(4), meas_sig(4)
         type(sr_ukf_type), intent(out) :: filter
         real(dp), intent(in), optional :: t, noise, max_vel, max_acc, k, a, b, def_rng, def_vel(2), def_acc(2)
+        integer, intent(in), optional :: max_iterations
         real(dp) :: trk_n, rng_use, cos_ang, sin_ang, v_t, trk_spd, jrjt(6,6), dim_var, ut_kappa, ut_alpha, ut_beta, ut_lambda, &
                     default_range, default_velocity(2), default_acceleration(2)
         call debug_error_condition(meas_sig(2) <= 0.0_dp, &
@@ -103,6 +107,7 @@ contains
         else
             default_range = 500.0_dp*nmi2ft_dp
         end if
+        if (present(max_iterations)) filter%max_iterations = max_iterations
         trk_n = 6.0_dp
         ut_lambda = ut_alpha**2 * (trk_n + ut_kappa) - trk_n
         filter%wx_1 = ut_lambda/(trk_n + ut_lambda)
@@ -161,36 +166,170 @@ contains
         end if
         !! assume no acceleration
         filter%state_estimate(5:6) = default_acceleration
-        !! initialize covariance as J * R * transpose(J), where J is the Jacobian of the state space and R is the measurement covariance
-        call generate_jrjt(obs, filter%state_estimate, meas_sig, jrjt)
-        if (meas_sig(1) < 0.0_dp) then
-            dim_var = (0.5_dp*rng_use)**2/3.0_dp
-            jrjt(1,1) = jrjt(1,1) + dim_var*cos_ang**2
-            jrjt(2,1) = jrjt(2,1) + dim_var*cos_ang*sin_ang
-            jrjt(1,2) = jrjt(1,2) + dim_var*cos_ang*sin_ang
-            jrjt(2,2) = jrjt(2,2) + dim_var*sin_ang**2
-        end if
-        if ((meas_sig(3) < 0.0_dp) .and. (meas_sig(4) < 0.0_dp)) then
+        if (.false.) then
+            !! initialize covariance as J * R * transpose(J), where J is the Jacobian of the state space and R is the measurement covariance
+            call generate_jrjt(obs, filter%state_estimate, meas_sig, jrjt)
+            if (meas_sig(1) < 0.0_dp) then
+                dim_var = (0.5_dp*rng_use)**2/3.0_dp
+                jrjt(1,1) = jrjt(1,1) + dim_var*cos_ang**2
+                jrjt(2,1) = jrjt(2,1) + dim_var*cos_ang*sin_ang
+                jrjt(1,2) = jrjt(1,2) + dim_var*cos_ang*sin_ang
+                jrjt(2,2) = jrjt(2,2) + dim_var*sin_ang**2
+            end if
+            if ((meas_sig(3) < 0.0_dp) .and. (meas_sig(4) < 0.0_dp)) then
+                dim_var = filter%maximum_velocity**2/3.0_dp
+                jrjt(3,3) = jrjt(3,3) + dim_var
+                jrjt(4,4) = jrjt(4,4) + dim_var
+            else if (meas_sig(3) < 0.0_dp) then !! missing range rate information, add radial velocity uncertainty
+                dim_var = filter%maximum_velocity**2/3.0_dp
+                jrjt(3,3) = jrjt(3,3) + dim_var*cos_ang**2
+                jrjt(4,3) = jrjt(4,3) + dim_var*cos_ang*sin_ang
+                jrjt(3,4) = jrjt(3,4) + dim_var*cos_ang*sin_ang
+                jrjt(4,4) = jrjt(4,4) + dim_var*sin_ang**2
+            else if (meas_sig(4) < 0.0_dp) then !! missing angle rate information, add tangential velocity uncertainty
+                dim_var = filter%maximum_velocity**2/3.0_dp
+                jrjt(3,3) = jrjt(3,3) + dim_var*sin_ang**2
+                jrjt(4,3) = jrjt(4,3) - dim_var*cos_ang*sin_ang
+                jrjt(3,4) = jrjt(3,4) - dim_var*cos_ang*sin_ang
+                jrjt(4,4) = jrjt(4,4) + dim_var*cos_ang**2
+            end if
+        else
+            jrjt = 0.0_dp
+            dim_var = (0.5_dp*default_range)**2/3.0_dp
+            jrjt(1,1) = dim_var
+            jrjt(2,2) = dim_var
             dim_var = filter%maximum_velocity**2/3.0_dp
-            jrjt(3,3) = jrjt(3,3) + dim_var
-            jrjt(4,4) = jrjt(4,4) + dim_var
-        else if (meas_sig(3) < 0.0_dp) then !! missing range rate information, add radial velocity uncertainty
-            dim_var = filter%maximum_velocity**2/3.0_dp
-            jrjt(3,3) = jrjt(3,3) + dim_var*cos_ang**2
-            jrjt(4,3) = jrjt(4,3) + dim_var*cos_ang*sin_ang
-            jrjt(3,4) = jrjt(3,4) + dim_var*cos_ang*sin_ang
-            jrjt(4,4) = jrjt(4,4) + dim_var*sin_ang**2
-        else if (meas_sig(4) < 0.0_dp) then !! missing angle rate information, add tangential velocity uncertainty
-            dim_var = filter%maximum_velocity**2/3.0_dp
-            jrjt(3,3) = jrjt(3,3) + dim_var*sin_ang**2
-            jrjt(4,3) = jrjt(4,3) - dim_var*cos_ang*sin_ang
-            jrjt(3,4) = jrjt(3,4) - dim_var*cos_ang*sin_ang
-            jrjt(4,4) = jrjt(4,4) + dim_var*cos_ang**2
+            jrjt(3,3) = dim_var
+            jrjt(4,4) = dim_var
         end if
         dim_var = filter%maximum_acceleration**2/3.0_dp
         jrjt(5,5) = jrjt(5,5) + dim_var
         jrjt(6,6) = jrjt(6,6) + dim_var
         call chol(jrjt, filter%covariance_square_root)
+        call iterate_p0(obs, meas, meas_sig, filter)
+    end
+
+    pure subroutine iterate_p0(obs, meas, meas_sig, filter)
+        real(dp), intent(in) :: obs(6), meas(4), meas_sig(4)
+        type(sr_ukf_type), intent(inout) :: filter
+        real(dp) :: sigma_points(6,13), sigma_points_meas(4,13), pred_meas(4), innovation(4), amat(4,19), amat_t(19,4), sqrt_wc, &
+                    square_root_measurement_covariance(4,4), cross_correlation(6,4), p_xz_transpose(4,6), temp(4,6), &
+                    s_z_transpose(4,4), k_t(4,6), kalman_gain(6,4), p(6,6), pzz_plus_r(4,4), y(4), chi2_0, chi2_now, chi2_diff
+        integer :: i, meas_dim, meas_ii(4), meas_index, iteration
+        !! return early if measurement provides no information
+        if (count(meas_sig > 0.0_dp) < 1) then
+            return
+        else
+        !! otherwise, collect valid measurement dimensions
+            meas_dim = 0
+            meas_ii = -1
+            do i=1,4
+                if (meas_sig(i) > 0.0_dp) then
+                    meas_dim = meas_dim + 1
+                    meas_ii(meas_dim) = i
+                end if
+            end do
+        end if
+        chi2_0 = huge(1.0_dp)
+        do iteration=1,filter%max_iterations-1
+            !! generate sigma points
+            call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
+            !! convert sigma_points to measurement space
+            do concurrent (i=1:13)
+                call cart2pol(obs, sigma_points(:,i), sigma_points_meas(:,i))
+            end do
+            !! center original state estimate dimension sigma_points for use later
+            call broadcast_sub(sigma_points, filter%state_estimate)
+            !! calculate sigma point weighted average predicted measurement
+            pred_meas = filter%wx_1*sigma_points_meas(:,1)
+            do i=1,6
+                pred_meas = pred_meas + filter%w_2_2n1*(sigma_points_meas(:,i+1) + sigma_points_meas(:,i+7))
+            end do
+            !! calculate innovation
+            innovation = 0.0_dp
+            do concurrent (i=1:meas_dim)
+                meas_index = meas_ii(i)
+                if (meas_index == 2) then !! meas_dim(meas_ii(i)) is ANGLE, need to properly wrap -pi/+pi
+                    innovation(meas_index) = atan2(sin(meas(meas_index) - pred_meas(meas_index)), &
+                                                   cos(meas(meas_index) - pred_meas(meas_index)))
+                else
+                    innovation(meas_index) = meas(meas_index) - pred_meas(meas_index)
+                end if
+            end do
+            !! center measurement space sigma points
+            do concurrent (i=1:13)
+                sigma_points_meas(:,i) = sigma_points_meas(:,i) - pred_meas
+                if (meas_sig(2) > 0.0_dp) sigma_points_meas(2,i) = atan2(sin(sigma_points_meas(2,i)), cos(sigma_points_meas(2,i)))
+            end do
+            !! form amat as [sqrt(w)*centered_measurement_sigma_points, sqrt(R)] where R is measurement covariance (independent)
+            amat = 0.0_dp
+            amat(1:meas_dim,1) = filter%wc_1*sigma_points_meas(meas_ii(1:meas_dim),1)
+            sqrt_wc = sqrt(filter%w_2_2n1)
+            do concurrent (i=2:13)
+                amat(1:meas_dim,i) = sqrt_wc*sigma_points_meas(meas_ii(1:meas_dim),i)
+            end do
+            do concurrent (i=1:meas_dim)
+                amat(i,13+i) = meas_sig(meas_ii(i))
+            end do
+            !! calculate square root of measurement covariance
+            amat_t = transpose(amat)
+            call qr(amat_t(1:13+meas_dim,1:meas_dim))
+            square_root_measurement_covariance = 0.0_dp
+            call extract_rt(amat_t(1:meas_dim,1:meas_dim), square_root_measurement_covariance(1:meas_dim,1:meas_dim))
+            !! calculate cross correlation
+            cross_correlation = 0.0_dp
+            cross_correlation(:,1:meas_dim) = filter%wc_1**2*matmul(sigma_points(:,1:1), &
+                                                                    transpose(sigma_points_meas(meas_ii(1:meas_dim),1:1)))
+            do i=2,13
+                cross_correlation(:,1:meas_dim) = cross_correlation(:,1:meas_dim) + &
+                                                  filter%w_2_2n1*matmul(sigma_points(:,i:i), &
+                                                                        transpose(sigma_points_meas(meas_ii(1:meas_dim),i:i)))
+            end do
+            !! calculate Kalman gain
+            p_xz_transpose(1:meas_dim,:) = transpose(cross_correlation(:,1:meas_dim))
+            temp = 0.0_dp !! (meas_dim x 6) to be filled in
+            do concurrent (i=1:6)
+                call forward_substitution(L=square_root_measurement_covariance(1:meas_dim,1:meas_dim), & !! sqrt measurement cov
+                                          b=p_xz_transpose(1:meas_dim,i), &                              !! cross covariance for each state dimension
+                                          x=temp(1:meas_dim,i))                                          !! temporary solution vector
+            end do
+            s_z_transpose(1:meas_dim,1:meas_dim) = transpose(square_root_measurement_covariance(1:meas_dim,1:meas_dim))
+            k_t = 0.0_dp !! transpose of Kalman gain, solved for using temp from above
+            do concurrent (i=1:6)
+                call backward_substitution(U=s_z_transpose(1:meas_dim,1:meas_dim), & !! transpose(Sz)
+                                           b=temp(1:meas_dim,i), &                   !! columns of temp, solved for above
+                                           x=k_t(1:meas_dim,i))                      !! columns of transpose(Kalman gain) --> rows of Kalman gain
+            end do
+            kalman_gain(:,1:meas_dim) = transpose(k_t(1:meas_dim,:))
+            !! update filter%covariance_square_root
+            call reform_cov(filter%covariance_square_root, p)
+            call reform_cov(square_root_measurement_covariance(1:meas_dim,1:meas_dim), pzz_plus_r(1:meas_dim,1:meas_dim))
+            p = p - matmul(kalman_gain(:,1:meas_dim), matmul(pzz_plus_r(1:meas_dim,1:meas_dim), k_t(1:meas_dim,:)))
+            call chol(p, filter%covariance_square_root)
+            !! solve sqrt(Pzz)*y = v for y
+            call forward_substitution(L=square_root_measurement_covariance(1:meas_dim,1:meas_dim), &
+                                      b=innovation(meas_ii(1:meas_dim)), &
+                                      x=y(1:meas_dim))
+            !! compute ||y||**2 = Chi**2 - monitor chi2 until it stops changing and is less than threshold
+            chi2_now = vdot(y(1:meas_dim), y(1:meas_dim))
+            chi2_diff = abs(chi2_0 - chi2_now)
+            if (chi2_diff < 0.01_dp) then
+                select case (meas_dim)
+                    case (1)
+                        if (chi2_now < 3.841_dp) exit
+                    case (2)
+                        if (chi2_now < 5.991_dp) exit
+                    case (3)
+                        if (chi2_now < 7.815_dp) exit
+                    case (4)
+                        if (chi2_now < 9.488_dp) exit
+                    case default
+                        error stop 'only implemented Chi**2 critical values for up to 4 degrees of freedom'
+                end select
+            else
+                chi2_0 = chi2_now
+            end if
+        end do
     end
 
     pure subroutine generate_jrjt(obs, tgt, meas_sig, jrjt)
@@ -255,9 +394,8 @@ contains
         real(dp), intent(in) :: opt_data(:)
         real(dp) :: sigma_points(6,13), sigma_points_meas(4,13), pred_meas(4), innovation(4), amat(4,19), amat_t(19,4), sqrt_wc, &
                     square_root_measurement_covariance(4,4), cross_correlation(6,4), p_xz_transpose(4,6), temp(4,6), &
-                    s_z_transpose(4,4), k_t(4,6), kalman_gain(6,4), p(6,6), pzz_plus_r(4,4), y(4), chi2_0, chi2_now, chi2_diff, &
-                    r_alpha
-        integer :: i, meas_dim, meas_ii(4), meas_index, iteration, iteration_max
+                    s_z_transpose(4,4), k_t(4,6), kalman_gain(6,4), p(6,6), pzz_plus_r(4,4), y(4), chi2_0, chi2_now, chi2_diff
+        integer :: i, meas_dim, meas_ii(4), meas_index, iteration
         !! update filter to current time
         call filter_time_update(filter, t, state_dynamics_model, opt_data)
         !! return early if measurement provides no information
@@ -274,10 +412,8 @@ contains
                 end if
             end do
         end if
-        iteration_max = 21
         chi2_0 = huge(1.0_dp)
-        do iteration=1,iteration_max
-            r_alpha = 1.0_dp + (iteration - 1)*0.1_dp
+        do iteration=1,filter%max_iterations
             !! generate sigma points
             call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
             !! convert sigma_points to measurement space
@@ -315,7 +451,7 @@ contains
                 amat(1:meas_dim,i) = sqrt_wc*sigma_points_meas(meas_ii(1:meas_dim),i)
             end do
             do concurrent (i=1:meas_dim)
-                amat(i,13+i) = meas_sig(meas_ii(i))*r_alpha
+                amat(i,13+i) = meas_sig(meas_ii(i))
             end do
             !! calculate square root of measurement covariance
             amat_t = transpose(amat)
@@ -349,6 +485,11 @@ contains
             kalman_gain(:,1:meas_dim) = transpose(k_t(1:meas_dim,:))
             !! update filter%state_estimate
             filter%state_estimate = filter%state_estimate + matmul(kalman_gain(:,1:meas_dim), innovation(meas_ii(1:meas_dim)))
+            !! update filter%covariance_square_root
+            call reform_cov(filter%covariance_square_root, p)
+            call reform_cov(square_root_measurement_covariance(1:meas_dim,1:meas_dim), pzz_plus_r(1:meas_dim,1:meas_dim))
+            p = p - matmul(kalman_gain(:,1:meas_dim), matmul(pzz_plus_r(1:meas_dim,1:meas_dim), k_t(1:meas_dim,:)))
+            call chol(p, filter%covariance_square_root)
             !! solve sqrt(Pzz)*y = v for y
             call forward_substitution(L=square_root_measurement_covariance(1:meas_dim,1:meas_dim), &
                                       b=innovation(meas_ii(1:meas_dim)), &
@@ -356,7 +497,7 @@ contains
             !! compute ||y||**2 = Chi**2 - monitor chi2 until it stops changing and is less than threshold
             chi2_now = vdot(y(1:meas_dim), y(1:meas_dim))
             chi2_diff = abs(chi2_0 - chi2_now)
-            if (chi2_diff < 0.1_dp) then
+            if (chi2_diff < huge(0.01_dp)) then
                 select case (meas_dim)
                     case (1)
                         if (chi2_now < 3.841_dp) exit
@@ -373,11 +514,6 @@ contains
                 chi2_0 = chi2_now
             end if
         end do
-        !! update filter%covariance_square_root
-        call reform_cov(filter%covariance_square_root, p)
-        call reform_cov(square_root_measurement_covariance(1:meas_dim,1:meas_dim), pzz_plus_r(1:meas_dim,1:meas_dim))
-        p = p - matmul(kalman_gain(:,1:meas_dim), matmul(pzz_plus_r(1:meas_dim,1:meas_dim), k_t(1:meas_dim,:)))
-        call chol(p, filter%covariance_square_root)
     end
 
     impure subroutine print_matrix(msg, mat)
@@ -580,7 +716,8 @@ contains
         real(dp), intent(in) :: sim_t, obs(6), tgt(6)
         type(sr_ukf_type), intent(in) :: filter
         logical, intent(in), optional :: extra
-        real(dp) :: p(6,6)
+        real(dp) :: p(6,6), sigma_points(6,13), sigma_points_meas(4,13), pred_meas(4), amat(4,13), amat_t(13,4), &
+                    square_root_measurement_covariance(4,4), sqrt_wc, pz(4,4)
         integer :: i
         write(*,'(a)') repeat('=', 32)
         write(*,'(a,2(f0.4,a))') 'Simulation Time: ',sim_t,' seconds, Filter Time: ',filter%state_estimate_time,' seconds'
@@ -593,9 +730,41 @@ contains
                                ', ax: ',filter%state_estimate(5),', ay: ',filter%state_estimate(6)
         call reform_cov(filter%covariance_square_root, p)
         write(*,'(6(a,e13.6))') '         Track Sigmas :: x: ',sqrt(p(1,1)),', y: ',sqrt(p(2,2)), &
-                               ', vx: ',sqrt(p(3,3)),', vy: ',sqrt(p(4,4)),', ax: ',sqrt(p(5,5)),', ay: ',sqrt(p(6,6))
+                                ', vx: ',sqrt(p(3,3)),', vy: ',sqrt(p(4,4)),', ax: ',sqrt(p(5,5)),', ay: ',sqrt(p(6,6))
+        call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
+        do concurrent (i=1:13)
+            call cart2pol(obs, sigma_points(:,i), sigma_points_meas(:,i))
+        end do
+        !! calculate sigma point weighted average predicted measurement
+        pred_meas = filter%wx_1*sigma_points_meas(:,1)
+        do i=1,6
+            pred_meas = pred_meas + filter%w_2_2n1*(sigma_points_meas(:,i+1) + sigma_points_meas(:,i+7))
+        end do
+        !! center measurement space sigma points
+        do concurrent (i=1:13)
+            sigma_points_meas(:,i) = sigma_points_meas(:,i) - pred_meas
+            sigma_points_meas(2,i) = atan2(sin(sigma_points_meas(2,i)), cos(sigma_points_meas(2,i)))
+        end do
+        !! form amat as [sqrt(w)*centered_measurement_sigma_points]
+        amat = 0.0_dp
+        amat(:,1) = filter%wc_1*sigma_points_meas(:,1)
+        sqrt_wc = sqrt(filter%w_2_2n1)
+        do concurrent (i=2:13)
+            amat(:,i) = sqrt_wc*sigma_points_meas(:,i)
+        end do
+        !! calculate square root of measurement covariance
+        amat_t = transpose(amat)
+        call qr(amat_t)
+        square_root_measurement_covariance = 0.0_dp
+        call extract_rt(amat_t(1:4,:), square_root_measurement_covariance)
+        call reform_cov(square_root_measurement_covariance, pz)
+        write(*,'(4(a,f0.2))') '   Polar Track Sigmas :: range: ',sqrt(pz(1,1)),', angle: ',sqrt(pz(2,2))*rad2deg_dp, &
+                               ', range-rate: ',sqrt(pz(3,3)),', angle-rate: ',sqrt(pz(4,4))*rad2deg_dp
         if (present(extra)) then
             if (extra) then
+                do i=1,4
+                    write(*,'(a,i0,a,4(e13.6," "))') 'Measurement-Space Covariance (row ',i,'): ',pz(i,:)
+                end do
                 do i=1,6
                     write(*,'(a,i0,a,6(e13.6," "))') 'Full Track Covariance (row ',i,'): ',p(i,:)
                 end do
@@ -628,8 +797,8 @@ contains
     end
 
     impure subroutine dump_summary(fid, reps, model_ii, filter_noise, init_sig_scale, init_sig, meas_sig, se_err, se_err_pol, &
-                                   ut_alpha, ut_lambda, ut_kappa)
-        integer, intent(in) :: fid, reps, model_ii
+                                   ut_alpha, ut_lambda, ut_kappa, max_iterations)
+        integer, intent(in) :: fid, reps, model_ii, max_iterations
         real(dp), intent(in) :: filter_noise, init_sig_scale, init_sig(4), meas_sig(4), se_err(:,:), se_err_pol(:,:), ut_alpha, &
                                 ut_lambda, ut_kappa
         real(dp) :: rmse_state(size(se_err,dim=1)), rmse_pol(size(se_err_pol,dim=1))
@@ -643,8 +812,9 @@ contains
         do concurrent (i=1:size(rmse_pol))
             rmse_pol(i) = rmse(se_err_pol(i,:), 0.0_dp)
         end do
-        write(unit=fid, fmt='(i0,",",i0,27(",",e13.6))') reps, model_ii, filter_noise, init_sig_scale, init_sig, &
-                                                         meas_sig, rmse_state, rmse_pol, ut_alpha, ut_lambda, ut_kappa
+        write(unit=fid, fmt='(i0,",",i0,26(",",e13.6),",",i0)') reps, model_ii, filter_noise, init_sig_scale, init_sig, &
+                                                                meas_sig, rmse_state, rmse_pol, ut_alpha, ut_lambda, ut_kappa, &
+                                                                max_iterations
     end
 
 end module ukf
@@ -661,10 +831,10 @@ implicit none
                                       .false., & !! 5, per-trial output to file
                                       .true.] !! 6, all-trial summary output to file
     real(dp), parameter :: dt = 1.0_dp
-    integer, parameter :: max_trials = 256
+    integer, parameter :: max_trials = 1024
     real(dp), parameter :: meas_sig1_list(*) = [-1.0_dp, 1.0_dp, 10.0_dp, 100.0_dp, nmi2ft_dp, 10.0_dp*nmi2ft_dp]
     real(dp), parameter :: meas_sig2_list(*) = [-1.0_dp, 0.01_dp*deg2rad_dp, 0.1_dp*deg2rad_dp, deg2rad_dp, 5.0_dp*deg2rad_dp]
-    real(dp), parameter :: meas_sig3_list(*) = [-1.0_dp, 0.1_dp, 10.0_dp, 100.0_dp, 200.0_dp]
+    real(dp), parameter :: meas_sig3_list(*) = [-1.0_dp, 0.1_dp, 10.0_dp, 100.0_dp, 200.0_dp, 1000.0_dp]
     real(dp), parameter :: meas_sig4_list(*) = [-1.0_dp, 0.001_dp*deg2rad_dp, 0.01_dp*deg2rad_dp, 0.1_dp*deg2rad_dp]
     real(dp), parameter :: init_scale_list(*) = [1.0_dp, 1.5_dp, 2.0_dp, 2.5_dp, 3.0_dp, 3.5_dp, 4.0_dp, 4.5_dp, 5.0_dp, 5.5_dp, &
                                                  6.0_dp, 6.5_dp, 7.0_dp, 7.5_dp, 8.0_dp, 8.5_dp, 9.0_dp]
@@ -675,6 +845,7 @@ implicit none
                                                1.0_dp]
     real(dp), parameter :: ut_lambda_list(*) = [0.0_dp, 0.001_dp, 0.01_dp, 0.1_dp, 1.0_dp, 2.0_dp, 3.0_dp, 4.0_dp, 5.0_dp, 6.0_dp, &
                                                 7.0_dp, 8.0_dp, 9.0_dp, 10.0_dp]
+    integer, parameter :: max_iterations_list(*) = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
     type(sr_ukf_type) :: filter
     real(dp) :: obs(6), tgt(6), meas(4), meas_sig(4), init_sig(4), t, no_opt_data(0), se_err(9,max_trials), tgt0(6), tgt_pol(4), &
@@ -684,7 +855,7 @@ implicit none
     real(dp), allocatable :: opt_data(:)
     integer :: state_model_ii, trial_ii, i, in_run_stats_fid, end_run_stats_fid, meas_sig1_ii, meas_sig2_ii, meas_sig3_ii, &
                meas_sig4_ii, sr_ukf_summary_fid, noise_ii, init_sig1_ii, init_sig2_ii, init_sig3_ii, init_sig4_ii, init_scale_ii, &
-               ut_alpha_ii, ut_lambda_ii
+               ut_alpha_ii, ut_lambda_ii, max_iterations_ii, max_iterations
 
     !! observer initial conditions
     obs = 0.0_dp
@@ -710,7 +881,8 @@ implicit none
         write(unit=sr_ukf_summary_fid, fmt='(a)') 'reps,state_model_ii,process_noise,init_sig_scale,init_sig_rng,init_sig_ang,'// &
                                                   'init_sig_rng_rt,init_sig_ang_rt,sig_rng,sig_ang,sig_rng_rt,sig_ang_rt,'// &
                                                   'rmse_x,rmse_y,rmse_vx,rmse_vy,rmse_ax,rmse_ay,rmse_pos,rmse_vel,rmse_acc,'// &
-                                                  'rmse_rng,rmse_ang,rmse_rng_rt,rmse_ang_rt,ut_alpha,ut_lambda,ut_kappa'
+                                                  'rmse_rng,rmse_ang,rmse_rng_rt,rmse_ang_rt,ut_alpha,ut_lambda,ut_kappa,'// &
+                                                  'max_iterations'
     end if
 
     do init_sig1_ii=6,6 ! 1,size(meas_sig1_list)
@@ -718,29 +890,31 @@ implicit none
     do init_sig2_ii=5,5 ! 1,size(meas_sig2_list)
         init_sig(2) = meas_sig2_list(init_sig2_ii)
         if (init_sig(2) <= 0.0_dp) cycle
-    do init_sig3_ii=5,5 ! 1,size(meas_sig3_list)
+    do init_sig3_ii=6,6 ! 1,size(meas_sig3_list)
         init_sig(3) = meas_sig3_list(init_sig3_ii)
     do init_sig4_ii=1,1 ! 1,size(meas_sig4_list)
         init_sig(4) = meas_sig4_list(init_sig4_ii)
     do init_scale_ii=1,1 ! 1,size(init_scale_list)
         init_sig_scale = init_scale_list(init_scale_ii)
-    do meas_sig1_ii=6,6 ! 1,size(meas_sig1_list)
+    do meas_sig1_ii=6,6 ! 2,size(meas_sig1_list)
         meas_sig(1) = meas_sig1_list(meas_sig1_ii)
-    do meas_sig2_ii=5,5 ! 1,size(meas_sig2_list)
+    do meas_sig2_ii=5,5 ! 2,size(meas_sig2_list)
         meas_sig(2) = meas_sig2_list(meas_sig2_ii)
-    do meas_sig3_ii=5,5 ! 1,size(meas_sig3_list)
+    do meas_sig3_ii=6,6 ! 2,size(meas_sig3_list)
         meas_sig(3) = meas_sig3_list(meas_sig3_ii)
     do meas_sig4_ii=1,1 ! 1,size(meas_sig4_list)
         meas_sig(4) = meas_sig4_list(meas_sig4_ii)
-    do noise_ii=2,4 ! 1,size(noise_list)
+    do noise_ii=1,size(noise_list)
         noise = noise_list(noise_ii)
-    do ut_alpha_ii=1,size(ut_alpha_list)
+    do ut_alpha_ii=28,28 ! 1,size(ut_alpha_list)
         ut_alpha = ut_alpha_list(ut_alpha_ii)
-    do ut_lambda_ii=1,size(ut_lambda_list)
+    do ut_lambda_ii=1,1 ! 1,size(ut_lambda_list)
         ut_lambda = ut_lambda_list(ut_lambda_ii)
         ut_kappa = (6.0_dp + ut_lambda)/ut_alpha**2 - 6.0_dp
+    do max_iterations_ii=1,size(max_iterations_list)
+        max_iterations = max_iterations_list(max_iterations_ii)
 
-    do state_model_ii=3,3
+    do state_model_ii=2,3
         if (allocated(opt_data)) deallocate(opt_data)
         select case (state_model_ii)
             case (1)
@@ -769,8 +943,10 @@ implicit none
     tgt0 = tgt
     !! generate initial measurement and initialize Square Root Unscented Kalman Filter
     t = 0.0_dp
-    call generate_observation(obs, tgt, meas, init_sig)
-    call initialize_sr_ukf(obs, meas, init_sig_scale*init_sig, filter, noise=noise, k=ut_kappa, a=ut_alpha)
+!    call generate_observation(obs, tgt, meas, init_sig)
+!    call initialize_sr_ukf(obs, meas, init_sig_scale*init_sig, filter, noise=noise, k=ut_kappa, a=ut_alpha)
+    call generate_observation(obs, tgt, meas, meas_sig)
+    call initialize_sr_ukf(obs, meas, meas_sig, filter, noise=noise, k=ut_kappa, a=ut_alpha, max_iterations=max_iterations)
     if (debug(1)) call print_status(t, obs, tgt, filter)
 
     do while (tgt(2) > 0.0_dp)
@@ -812,7 +988,7 @@ implicit none
 
     if (debug(6)) then
         call dump_summary(sr_ukf_summary_fid, max_trials, state_model_ii, noise, init_sig_scale, init_sig, &
-                          meas_sig, se_err, se_err_pol, ut_alpha, ut_lambda, ut_kappa)
+                          meas_sig, se_err, se_err_pol, ut_alpha, ut_lambda, ut_kappa, max_iterations)
         flush(sr_ukf_summary_fid)
     end if
     if (debug(3)) then
@@ -836,6 +1012,7 @@ implicit none
         write(*,'(a,/)') repeat('=', 32)
     end if
 
+    end do !! max_iterations_ii
     end do !! ut_lambda_ii
     end do !! ut_alpha_ii
     end do !! state_model_ii
