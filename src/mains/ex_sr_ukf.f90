@@ -231,7 +231,7 @@ contains
             end do
         end if
         chi2_0 = huge(1.0_dp)
-        do iteration=1,filter%max_iterations-1
+        do iteration=1,filter%max_iterations
             !! generate sigma points
             call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
             !! convert sigma_points to measurement space
@@ -413,7 +413,7 @@ contains
             end do
         end if
         chi2_0 = huge(1.0_dp)
-        do iteration=1,1 ! filter%max_iterations
+        do iteration=1,filter%max_iterations
             !! generate sigma points
             call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
             !! convert sigma_points to measurement space
@@ -485,11 +485,6 @@ contains
             kalman_gain(:,1:meas_dim) = transpose(k_t(1:meas_dim,:))
             !! update filter%state_estimate
             filter%state_estimate = filter%state_estimate + matmul(kalman_gain(:,1:meas_dim), innovation(meas_ii(1:meas_dim)))
-            !! update filter%covariance_square_root
-            call reform_cov(filter%covariance_square_root, p)
-            call reform_cov(square_root_measurement_covariance(1:meas_dim,1:meas_dim), pzz_plus_r(1:meas_dim,1:meas_dim))
-            p = p - matmul(kalman_gain(:,1:meas_dim), matmul(pzz_plus_r(1:meas_dim,1:meas_dim), k_t(1:meas_dim,:)))
-            call chol(p, filter%covariance_square_root)
             !! solve sqrt(Pzz)*y = v for y
             call forward_substitution(L=square_root_measurement_covariance(1:meas_dim,1:meas_dim), &
                                       b=innovation(meas_ii(1:meas_dim)), &
@@ -514,6 +509,11 @@ contains
                 chi2_0 = chi2_now
             end if
         end do
+        !! update filter%covariance_square_root
+        call reform_cov(filter%covariance_square_root, p)
+        call reform_cov(square_root_measurement_covariance(1:meas_dim,1:meas_dim), pzz_plus_r(1:meas_dim,1:meas_dim))
+        p = p - matmul(kalman_gain(:,1:meas_dim), matmul(pzz_plus_r(1:meas_dim,1:meas_dim), k_t(1:meas_dim,:)))
+        call chol(p, filter%covariance_square_root)
     end
 
     impure subroutine print_matrix(msg, mat)
