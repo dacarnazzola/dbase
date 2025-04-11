@@ -2,7 +2,7 @@ module ukf
 use, non_intrinsic :: kinds, only: dp
 use, non_intrinsic :: constants, only: nmi2ft_dp, deg2rad_dp, eps_dp
 use, non_intrinsic :: system, only: debug_error_condition, nearly
-use, non_intrinsic :: vector_math, only: vmag
+use, non_intrinsic :: vector_math, only: vmag, vdot
 use, non_intrinsic :: matrix_math, only: chol, qr, forward_substitution, backward_substitution
 use, non_intrinsic :: array_utils, only: broadcast_sub
 use, non_intrinsic :: random, only: random_normal
@@ -255,8 +255,9 @@ contains
         real(dp), intent(in) :: opt_data(:)
         real(dp) :: sigma_points(6,13), sigma_points_meas(4,13), pred_meas(4), innovation(4), amat(4,19), amat_t(19,4), sqrt_wc, &
                     square_root_measurement_covariance(4,4), cross_correlation(6,4), p_xz_transpose(4,6), temp(4,6), &
-                    s_z_transpose(4,4), k_t(4,6), kalman_gain(6,4), p(6,6), pzz_plus_r(4,4)
-        integer :: i, meas_dim, meas_ii(4), meas_index
+                    s_z_transpose(4,4), k_t(4,6), kalman_gain(6,4), p(6,6), pzz_plus_r(4,4), y(4), chi2_0, chi2_now, chi2_diff, &
+                    r_alpha
+        integer :: i, meas_dim, meas_ii(4), meas_index, iteration, iteration_max
         !! update filter to current time
         call filter_time_update(filter, t, state_dynamics_model, opt_data)
         !! return early if measurement provides no information
@@ -273,77 +274,105 @@ contains
                 end if
             end do
         end if
-        !! generate sigma points
-        call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
-        !! convert sigma_points to measurement space
-        do concurrent (i=1:13)
-            call cart2pol(obs, sigma_points(:,i), sigma_points_meas(:,i))
-        end do
-        !! center original state estimate dimension sigma_points for use later
-        call broadcast_sub(sigma_points, filter%state_estimate)
-        !! calculate sigma point weighted average predicted measurement
-        pred_meas = filter%wx_1*sigma_points_meas(:,1)
-        do i=1,6
-            pred_meas = pred_meas + filter%w_2_2n1*(sigma_points_meas(:,i+1) + sigma_points_meas(:,i+7))
-        end do
-        !! calculate innovation
-        innovation = 0.0_dp
-        do concurrent (i=1:meas_dim)
-            meas_index = meas_ii(i)
-            if (meas_index == 2) then !! meas_dim(meas_ii(i)) is ANGLE, need to properly wrap -pi/+pi
-                innovation(meas_index) = atan2(sin(meas(meas_index) - pred_meas(meas_index)), &
-                                               cos(meas(meas_index) - pred_meas(meas_index)))
+        iteration_max = 21
+        chi2_0 = huge(1.0_dp)
+        do iteration=1,iteration_max
+            r_alpha = 1.0_dp + (iteration - 1)*0.1_dp
+            !! generate sigma points
+            call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
+            !! convert sigma_points to measurement space
+            do concurrent (i=1:13)
+                call cart2pol(obs, sigma_points(:,i), sigma_points_meas(:,i))
+            end do
+            !! center original state estimate dimension sigma_points for use later
+            call broadcast_sub(sigma_points, filter%state_estimate)
+            !! calculate sigma point weighted average predicted measurement
+            pred_meas = filter%wx_1*sigma_points_meas(:,1)
+            do i=1,6
+                pred_meas = pred_meas + filter%w_2_2n1*(sigma_points_meas(:,i+1) + sigma_points_meas(:,i+7))
+            end do
+            !! calculate innovation
+            innovation = 0.0_dp
+            do concurrent (i=1:meas_dim)
+                meas_index = meas_ii(i)
+                if (meas_index == 2) then !! meas_dim(meas_ii(i)) is ANGLE, need to properly wrap -pi/+pi
+                    innovation(meas_index) = atan2(sin(meas(meas_index) - pred_meas(meas_index)), &
+                                                   cos(meas(meas_index) - pred_meas(meas_index)))
+                else
+                    innovation(meas_index) = meas(meas_index) - pred_meas(meas_index)
+                end if
+            end do
+            !! center measurement space sigma points
+            do concurrent (i=1:13)
+                sigma_points_meas(:,i) = sigma_points_meas(:,i) - pred_meas
+                if (meas_sig(2) > 0.0_dp) sigma_points_meas(2,i) = atan2(sin(sigma_points_meas(2,i)), cos(sigma_points_meas(2,i)))
+            end do
+            !! form amat as [sqrt(w)*centered_measurement_sigma_points, sqrt(R)] where R is measurement covariance (independent)
+            amat = 0.0_dp
+            amat(1:meas_dim,1) = filter%wc_1*sigma_points_meas(meas_ii(1:meas_dim),1)
+            sqrt_wc = sqrt(filter%w_2_2n1)
+            do concurrent (i=2:13)
+                amat(1:meas_dim,i) = sqrt_wc*sigma_points_meas(meas_ii(1:meas_dim),i)
+            end do
+            do concurrent (i=1:meas_dim)
+                amat(i,13+i) = meas_sig(meas_ii(i))*r_alpha
+            end do
+            !! calculate square root of measurement covariance
+            amat_t = transpose(amat)
+            call qr(amat_t(1:13+meas_dim,1:meas_dim))
+            square_root_measurement_covariance = 0.0_dp
+            call extract_rt(amat_t(1:meas_dim,1:meas_dim), square_root_measurement_covariance(1:meas_dim,1:meas_dim))
+            !! calculate cross correlation
+            cross_correlation = 0.0_dp
+            cross_correlation(:,1:meas_dim) = filter%wc_1**2*matmul(sigma_points(:,1:1), &
+                                                                    transpose(sigma_points_meas(meas_ii(1:meas_dim),1:1)))
+            do i=2,13
+                cross_correlation(:,1:meas_dim) = cross_correlation(:,1:meas_dim) + &
+                                                  filter%w_2_2n1*matmul(sigma_points(:,i:i), &
+                                                                        transpose(sigma_points_meas(meas_ii(1:meas_dim),i:i)))
+            end do
+            !! calculate Kalman gain
+            p_xz_transpose(1:meas_dim,:) = transpose(cross_correlation(:,1:meas_dim))
+            temp = 0.0_dp !! (meas_dim x 6) to be filled in
+            do concurrent (i=1:6)
+                call forward_substitution(L=square_root_measurement_covariance(1:meas_dim,1:meas_dim), & !! sqrt measurement cov
+                                          b=p_xz_transpose(1:meas_dim,i), &                              !! cross covariance for each state dimension
+                                          x=temp(1:meas_dim,i))                                          !! temporary solution vector
+            end do
+            s_z_transpose(1:meas_dim,1:meas_dim) = transpose(square_root_measurement_covariance(1:meas_dim,1:meas_dim))
+            k_t = 0.0_dp !! transpose of Kalman gain, solved for using temp from above
+            do concurrent (i=1:6)
+                call backward_substitution(U=s_z_transpose(1:meas_dim,1:meas_dim), & !! transpose(Sz)
+                                           b=temp(1:meas_dim,i), &                   !! columns of temp, solved for above
+                                           x=k_t(1:meas_dim,i))                      !! columns of transpose(Kalman gain) --> rows of Kalman gain
+            end do
+            kalman_gain(:,1:meas_dim) = transpose(k_t(1:meas_dim,:))
+            !! update filter%state_estimate
+            filter%state_estimate = filter%state_estimate + matmul(kalman_gain(:,1:meas_dim), innovation(meas_ii(1:meas_dim)))
+            !! solve sqrt(Pzz)*y = v for y
+            call forward_substitution(L=square_root_measurement_covariance(1:meas_dim,1:meas_dim), &
+                                      b=innovation(meas_ii(1:meas_dim)), &
+                                      x=y(1:meas_dim))
+            !! compute ||y||**2 = Chi**2 - monitor chi2 until it stops changing and is less than threshold
+            chi2_now = vdot(y(1:meas_dim), y(1:meas_dim))
+            chi2_diff = abs(chi2_0 - chi2_now)
+            if (chi2_diff < 0.1_dp) then
+                select case (meas_dim)
+                    case (1)
+                        if (chi2_now < 3.841_dp) exit
+                    case (2)
+                        if (chi2_now < 5.991_dp) exit
+                    case (3)
+                        if (chi2_now < 7.815_dp) exit
+                    case (4)
+                        if (chi2_now < 9.488_dp) exit
+                    case default
+                        error stop 'only implemented Chi**2 critical values for up to 4 degrees of freedom'
+                end select
             else
-                innovation(meas_index) = meas(meas_index) - pred_meas(meas_index)
+                chi2_0 = chi2_now
             end if
         end do
-        !! center measurement space sigma points
-        do concurrent (i=1:13)
-            sigma_points_meas(:,i) = sigma_points_meas(:,i) - pred_meas
-            if (meas_sig(2) > 0.0_dp) sigma_points_meas(2,i) = atan2(sin(sigma_points_meas(2,i)), cos(sigma_points_meas(2,i)))
-        end do
-        !! form amat as [sqrt(w)*centered_measurement_sigma_points, sqrt(R)] where R is measurement covariance (independent)
-        amat = 0.0_dp
-        amat(1:meas_dim,1) = filter%wc_1*sigma_points_meas(meas_ii(1:meas_dim),1)
-        sqrt_wc = sqrt(filter%w_2_2n1)
-        do concurrent (i=2:13)
-            amat(1:meas_dim,i) = sqrt_wc*sigma_points_meas(meas_ii(1:meas_dim),i)
-        end do
-        do concurrent (i=1:meas_dim)
-            amat(i,13+i) = meas_sig(meas_ii(i))
-        end do
-        !! calculate square root of measurement covariance
-        amat_t = transpose(amat)
-        call qr(amat_t(1:13+meas_dim,1:meas_dim))
-        square_root_measurement_covariance = 0.0_dp
-        call extract_rt(amat_t(1:meas_dim,1:meas_dim), square_root_measurement_covariance(1:meas_dim,1:meas_dim))
-        !! calculate cross correlation
-        cross_correlation = 0.0_dp
-        cross_correlation(:,1:meas_dim) = filter%wc_1**2*matmul(sigma_points(:,1:1), &
-                                                                transpose(sigma_points_meas(meas_ii(1:meas_dim),1:1)))
-        do i=2,13
-            cross_correlation(:,1:meas_dim) = cross_correlation(:,1:meas_dim) + &
-                                              filter%w_2_2n1*matmul(sigma_points(:,i:i), &
-                                                                    transpose(sigma_points_meas(meas_ii(1:meas_dim),i:i)))
-        end do
-        !! calculate Kalman gain
-        p_xz_transpose(1:meas_dim,:) = transpose(cross_correlation(:,1:meas_dim))
-        temp = 0.0_dp !! (meas_dim x 6) to be filled in
-        do concurrent (i=1:6)
-            call forward_substitution(L=square_root_measurement_covariance(1:meas_dim,1:meas_dim), & !! sqrt measurement cov
-                                      b=p_xz_transpose(1:meas_dim,i), &                              !! cross covariance for each state dimension
-                                      x=temp(1:meas_dim,i))                                          !! temporary solution vector
-        end do
-        s_z_transpose(1:meas_dim,1:meas_dim) = transpose(square_root_measurement_covariance(1:meas_dim,1:meas_dim))
-        k_t = 0.0_dp !! transpose of Kalman gain, solved for using temp from above
-        do concurrent (i=1:6)
-            call backward_substitution(U=s_z_transpose(1:meas_dim,1:meas_dim), & !! transpose(Sz)
-                                       b=temp(1:meas_dim,i), &                   !! columns of temp, solved for above
-                                       x=k_t(1:meas_dim,i))                      !! columns of transpose(Kalman gain) --> rows of Kalman gain
-        end do
-        kalman_gain(:,1:meas_dim) = transpose(k_t(1:meas_dim,:))
-        !! update filter%state_estimate
-        filter%state_estimate = filter%state_estimate + matmul(kalman_gain(:,1:meas_dim), innovation(meas_ii(1:meas_dim)))
         !! update filter%covariance_square_root
         call reform_cov(filter%covariance_square_root, p)
         call reform_cov(square_root_measurement_covariance(1:meas_dim,1:meas_dim), pzz_plus_r(1:meas_dim,1:meas_dim))
@@ -632,7 +661,7 @@ implicit none
                                       .false., & !! 5, per-trial output to file
                                       .true.] !! 6, all-trial summary output to file
     real(dp), parameter :: dt = 1.0_dp
-    integer, parameter :: max_trials = 1024
+    integer, parameter :: max_trials = 256
     real(dp), parameter :: meas_sig1_list(*) = [-1.0_dp, 1.0_dp, 10.0_dp, 100.0_dp, nmi2ft_dp, 10.0_dp*nmi2ft_dp]
     real(dp), parameter :: meas_sig2_list(*) = [-1.0_dp, 0.01_dp*deg2rad_dp, 0.1_dp*deg2rad_dp, deg2rad_dp, 5.0_dp*deg2rad_dp]
     real(dp), parameter :: meas_sig3_list(*) = [-1.0_dp, 0.1_dp, 10.0_dp, 100.0_dp, 200.0_dp]
@@ -693,7 +722,7 @@ implicit none
         init_sig(3) = meas_sig3_list(init_sig3_ii)
     do init_sig4_ii=1,1 ! 1,size(meas_sig4_list)
         init_sig(4) = meas_sig4_list(init_sig4_ii)
-    do init_scale_ii=1,size(init_scale_list)
+    do init_scale_ii=1,1 ! 1,size(init_scale_list)
         init_sig_scale = init_scale_list(init_scale_ii)
     do meas_sig1_ii=6,6 ! 1,size(meas_sig1_list)
         meas_sig(1) = meas_sig1_list(meas_sig1_ii)
@@ -703,11 +732,11 @@ implicit none
         meas_sig(3) = meas_sig3_list(meas_sig3_ii)
     do meas_sig4_ii=1,1 ! 1,size(meas_sig4_list)
         meas_sig(4) = meas_sig4_list(meas_sig4_ii)
-    do noise_ii=1,4 ! 1,size(noise_list)
+    do noise_ii=2,4 ! 1,size(noise_list)
         noise = noise_list(noise_ii)
     do ut_alpha_ii=1,size(ut_alpha_list)
         ut_alpha = ut_alpha_list(ut_alpha_ii)
-    do ut_lambda_ii=1,1 ! 1,size(ut_lambda_list)
+    do ut_lambda_ii=1,size(ut_lambda_list)
         ut_lambda = ut_lambda_list(ut_lambda_ii)
         ut_kappa = (6.0_dp + ut_lambda)/ut_alpha**2 - 6.0_dp
 
