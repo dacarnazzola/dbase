@@ -206,7 +206,7 @@ contains
         jrjt(5,5) = jrjt(5,5) + dim_var
         jrjt(6,6) = jrjt(6,6) + dim_var
         call chol(jrjt, filter%covariance_square_root)
-        call iterate_p0(obs, meas, meas_sig, filter)
+        if (.false.) call iterate_p0(obs, meas, meas_sig, filter)
     end
 
     pure subroutine iterate_p0(obs, meas, meas_sig, filter)
@@ -393,9 +393,9 @@ contains
         procedure(dynamics_model) :: state_dynamics_model
         real(dp), intent(in) :: opt_data(:)
         real(dp) :: sigma_points(6,13), sigma_points_meas(4,13), pred_meas(4), innovation(4), amat(4,19), amat_t(19,4), sqrt_wc, &
-                    square_root_measurement_covariance(4,4), cross_correlation(6,4), p_xz_transpose(4,6), temp(4,6), &
+                    square_root_measurement_covariance(4,4), cross_correlation(6,4), p_xz_transpose(4,6), temp(4,6), r_alpha, &
                     s_z_transpose(4,4), k_t(4,6), kalman_gain(6,4), p(6,6), pzz_plus_r(4,4), y(4), chi2_0, chi2_now, chi2_diff
-        integer :: i, meas_dim, meas_ii(4), meas_index, iteration, r_alpha
+        integer :: i, meas_dim, meas_ii(4), meas_index, iteration
         !! update filter to current time
         call filter_time_update(filter, t, state_dynamics_model, opt_data)
         !! return early if measurement provides no information
@@ -413,7 +413,7 @@ contains
             end do
         end if
         chi2_0 = huge(1.0_dp)
-        do iteration=1,filter%max_iterations
+        do iteration=1,1 ! filter%max_iterations
             !! generate sigma points
             call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
             !! convert sigma_points to measurement space
@@ -450,7 +450,11 @@ contains
             do concurrent (i=2:13)
                 amat(1:meas_dim,i) = sqrt_wc*sigma_points_meas(meas_ii(1:meas_dim),i)
             end do
-            r_alpha = 1.0_dp + (iteration - 1)*0.1_dp
+            if (t < real(filter%max_iterations,dp)) then
+                r_alpha = 2.0_dp
+            else
+                r_alpha = 1.0_dp
+            end if
             do concurrent (i=1:meas_dim)
                 amat(i,13+i) = meas_sig(meas_ii(i))*r_alpha
             end do
@@ -718,7 +722,7 @@ contains
         type(sr_ukf_type), intent(in) :: filter
         logical, intent(in), optional :: extra
         real(dp) :: p(6,6), sigma_points(6,13), sigma_points_meas(4,13), pred_meas(4), amat(4,13), amat_t(13,4), &
-                    square_root_measurement_covariance(4,4), sqrt_wc, pz(4,4)
+                    square_root_measurement_covariance(4,4), sqrt_wc, pz(4,4), tgt_pol(4), err_pol(4)
         integer :: i
         write(*,'(a)') repeat('=', 32)
         write(*,'(a,2(f0.4,a))') 'Simulation Time: ',sim_t,' seconds, Filter Time: ',filter%state_estimate_time,' seconds'
@@ -729,6 +733,12 @@ contains
         write(*,'(6(a,e13.6))') 'Filter State Estimate :: x: ',filter%state_estimate(1),', y: ',filter%state_estimate(2), &
                                ', vx: ',filter%state_estimate(3),', vy: ',filter%state_estimate(4), &
                                ', ax: ',filter%state_estimate(5),', ay: ',filter%state_estimate(6)
+        write(*,'(6(a,e13.6))') '                Error :: x: ',tgt(1)-filter%state_estimate(1), &
+                                                       ', y: ',tgt(2)-filter%state_estimate(2), &
+                                                      ', vx: ',tgt(3)-filter%state_estimate(3), &
+                                                      ', vy: ',tgt(4)-filter%state_estimate(4), &
+                                                      ', ax: ',tgt(5)-filter%state_estimate(5), &
+                                                      ', ay: ',tgt(6)-filter%state_estimate(6)
         call reform_cov(filter%covariance_square_root, p)
         write(*,'(6(a,e13.6))') '         Track Sigmas :: x: ',sqrt(p(1,1)),', y: ',sqrt(p(2,2)), &
                                 ', vx: ',sqrt(p(3,3)),', vy: ',sqrt(p(4,4)),', ax: ',sqrt(p(5,5)),', ay: ',sqrt(p(6,6))
@@ -741,6 +751,15 @@ contains
         do i=1,6
             pred_meas = pred_meas + filter%w_2_2n1*(sigma_points_meas(:,i+1) + sigma_points_meas(:,i+7))
         end do
+        call cart2pol(obs, tgt, tgt_pol)
+        write(*,'(4(a,e13.6))') '   Target Polar State :: range: ',tgt_pol(1),', angle: ',tgt_pol(2), &
+                               ', range-rate: ',tgt_pol(3),', angle-rate: ',tgt_pol(4)
+        write(*,'(4(a,e13.6))') 'Filter Polar Estimate :: range: ',pred_meas(1),', angle: ',pred_meas(2), &
+                               ', range-rate: ',pred_meas(3),', angle-rate: ',pred_meas(4)
+        err_pol = tgt_pol - pred_meas
+        err_pol(2) = atan2(sin(err_pol(2)), cos(err_pol(2)))
+        write(*,'(4(a,e13.6))') '          Polar Error :: range: ',err_pol(1),', angle: ',err_pol(2), &
+                               ', range-rate: ',err_pol(3),', angle-rate: ',err_pol(4)
         !! center measurement space sigma points
         do concurrent (i=1:13)
             sigma_points_meas(:,i) = sigma_points_meas(:,i) - pred_meas
@@ -759,7 +778,7 @@ contains
         square_root_measurement_covariance = 0.0_dp
         call extract_rt(amat_t(1:4,:), square_root_measurement_covariance)
         call reform_cov(square_root_measurement_covariance, pz)
-        write(*,'(4(a,f0.2))') '   Polar Track Sigmas :: range: ',sqrt(pz(1,1)),', angle: ',sqrt(pz(2,2))*rad2deg_dp, &
+        write(*,'(4(a,e13.6))') '   Polar Track Sigmas :: range: ',sqrt(pz(1,1)),', angle: ',sqrt(pz(2,2))*rad2deg_dp, &
                                ', range-rate: ',sqrt(pz(3,3)),', angle-rate: ',sqrt(pz(4,4))*rad2deg_dp
         if (present(extra)) then
             if (extra) then
@@ -825,14 +844,14 @@ program ex_sr_ukf
 use, non_intrinsic :: ukf
 implicit none
 
-    logical, parameter :: debug(*) = [.false., & !! 1, per-observation
+    logical, parameter :: debug(*) = [.true., & !! 1, per-observation
                                       .false., & !! 2, per-trial
                                       .false., & !! 3, all-trial summary
                                       .false., & !! 4, per-observation output to file
                                       .false., & !! 5, per-trial output to file
                                       .true.] !! 6, all-trial summary output to file
     real(dp), parameter :: dt = 1.0_dp
-    integer, parameter :: max_trials = 1024
+    integer, parameter :: max_trials = 10
     real(dp), parameter :: meas_sig1_list(*) = [-1.0_dp, 1.0_dp, 10.0_dp, 100.0_dp, nmi2ft_dp, 10.0_dp*nmi2ft_dp]
     real(dp), parameter :: meas_sig2_list(*) = [-1.0_dp, 0.01_dp*deg2rad_dp, 0.1_dp*deg2rad_dp, deg2rad_dp, 5.0_dp*deg2rad_dp]
     real(dp), parameter :: meas_sig3_list(*) = [-1.0_dp, 0.1_dp, 10.0_dp, 100.0_dp, 200.0_dp, 1000.0_dp]
