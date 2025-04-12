@@ -46,7 +46,7 @@ private
 
     public :: dp, nmi2ft_dp, deg2rad_dp, g, sr_ukf_type, initialize_sr_ukf, dynamics_ballistic, filter_measurement_update, &
               generate_observation, print_status, print_matrix, dynamics_constant_velocity, dynamics_constant_acceleration, &
-              dynamics_model, rmse, sort, dump_states, dump_summary
+              dynamics_model, rmse, sort, dump_summary
 
 contains
 
@@ -198,15 +198,15 @@ contains
             dim_var = (0.5_dp*default_range)**2/3.0_dp
             jrjt(1,1) = dim_var
             jrjt(2,2) = dim_var
-            dim_var = (0.5_dp*filter%maximum_velocity)**2/3.0_dp
+            dim_var = filter%maximum_velocity**2/3.0_dp
             jrjt(3,3) = dim_var
             jrjt(4,4) = dim_var
         end if
-        dim_var = (0.5_dp*filter%maximum_acceleration)**2/3.0_dp
+        dim_var = filter%maximum_acceleration**2/3.0_dp
         jrjt(5,5) = jrjt(5,5) + dim_var
         jrjt(6,6) = jrjt(6,6) + dim_var
         call chol(jrjt, filter%covariance_square_root)
-        if (.false.) call iterate_p0(obs, meas, meas_sig, filter)
+        call iterate_p0(obs, meas, meas_sig, filter)
     end
 
     pure subroutine iterate_p0(obs, meas, meas_sig, filter)
@@ -406,7 +406,7 @@ contains
         procedure(dynamics_model) :: state_dynamics_model
         real(dp), intent(in) :: opt_data(:)
         real(dp) :: sigma_points(6,13), sigma_points_meas(4,13), pred_meas(4), innovation(4), amat(4,19), amat_t(19,4), sqrt_wc, &
-                    square_root_measurement_covariance(4,4), cross_correlation(6,4), p_xz_transpose(4,6), temp(4,6), r_alpha, &
+                    square_root_measurement_covariance(4,4), cross_correlation(6,4), p_xz_transpose(4,6), temp(4,6), &
                     s_z_transpose(4,4), k_t(4,6), kalman_gain(6,4), p(6,6), pzz_plus_r(4,4), y(4), chi2_0, chi2_now, chi2_diff, &
                     ang_sin(2), ang_cos(2)
         integer :: i, meas_dim, meas_ii(4), meas_index, iteration
@@ -427,7 +427,7 @@ contains
             end do
         end if
         chi2_0 = huge(1.0_dp)
-        do iteration=1,1 ! filter%max_iterations
+        do iteration=1,filter%max_iterations
             !! generate sigma points
             call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
             !! convert sigma_points to measurement space
@@ -476,13 +476,8 @@ contains
             do concurrent (i=2:13)
                 amat(1:meas_dim,i) = sqrt_wc*sigma_points_meas(meas_ii(1:meas_dim),i)
             end do
-            if (t < real(filter%max_iterations,dp)) then
-                r_alpha = 2.0_dp
-            else
-                r_alpha = 1.0_dp
-            end if
             do concurrent (i=1:meas_dim)
-                amat(i,13+i) = meas_sig(meas_ii(i))*r_alpha
+                amat(i,13+i) = meas_sig(meas_ii(i))
             end do
             !! calculate square root of measurement covariance
             amat_t = transpose(amat)
@@ -743,13 +738,17 @@ contains
         end if
     end
 
-    impure subroutine print_status(sim_t, obs, tgt, filter, extra)
+    impure subroutine print_status(trial, sim_t, obs, tgt, filter, fid, extra)
+        integer, intent(in) :: trial
         real(dp), intent(in) :: sim_t, obs(6), tgt(6)
         type(sr_ukf_type), intent(in) :: filter
+        integer, intent(in), optional :: fid
         logical, intent(in), optional :: extra
         real(dp) :: p(6,6), sigma_points(6,13), sigma_points_meas(4,13), pred_meas(4), amat(4,13), amat_t(13,4), &
-                    square_root_measurement_covariance(4,4), sqrt_wc, pz(4,4), tgt_pol(4), err_pol(4), ang_sin(2), ang_cos(2)
+                    square_root_measurement_covariance(4,4), sqrt_wc, pz(4,4), tgt_pol(4), err_pol(4), ang_sin(2), ang_cos(2), &
+                    sigs(6), sigs_pol(4), err(6)
         integer :: i
+        if (.not.present(fid)) then
         write(*,'(a)') repeat('=', 32)
         write(*,'(a,2(f0.4,a))') 'Simulation Time: ',sim_t,' seconds, Filter Time: ',filter%state_estimate_time,' seconds'
         write(*,'(4(a,f0.4))') 'Wx0: ',filter%wx_1,', Wc0: ',filter%wc_1,', Wi: ',filter%w_2_2n1,', gamma: ',filter%ut_gamma
@@ -760,15 +759,18 @@ contains
         write(*,'(6(a,e13.6))') 'Filter State Estimate :: x: ',filter%state_estimate(1),', y: ',filter%state_estimate(2), &
                                ', vx: ',filter%state_estimate(3),', vy: ',filter%state_estimate(4), &
                                ', ax: ',filter%state_estimate(5),', ay: ',filter%state_estimate(6)
-        write(*,'(6(a,e13.6))') '                Error :: x: ',tgt(1)-filter%state_estimate(1), &
-                                                       ', y: ',tgt(2)-filter%state_estimate(2), &
-                                                      ', vx: ',tgt(3)-filter%state_estimate(3), &
-                                                      ', vy: ',tgt(4)-filter%state_estimate(4), &
-                                                      ', ax: ',tgt(5)-filter%state_estimate(5), &
-                                                      ', ay: ',tgt(6)-filter%state_estimate(6)
+        end if
+        err = tgt - filter%state_estimate
+        if (.not.present(fid)) then
+        write(*,'(6(a,e13.6))') '                Error :: x: ',err(1),', y: ',err(2),', vx: ',err(3),', vy: ',err(4), &
+                                                      ', ax: ',err(5),', ay: ',err(6)
+        end if
         call reform_cov(filter%covariance_square_root, p)
-        write(*,'(6(a,e13.6))') '         Track Sigmas :: x: ',sqrt(p(1,1)),', y: ',sqrt(p(2,2)), &
-                                ', vx: ',sqrt(p(3,3)),', vy: ',sqrt(p(4,4)),', ax: ',sqrt(p(5,5)),', ay: ',sqrt(p(6,6))
+        sigs = sqrt([p(1,1), p(2,2), p(3,3), p(4,4), p(5,5), p(6,6)])
+        if (.not.present(fid)) then
+        write(*,'(6(a,e13.6))') '         Track Sigmas :: x: ',sigs(1),', y: ',sigs(2), &
+                                ', vx: ',sigs(3),', vy: ',sigs(4),', ax: ',sigs(5),', ay: ',sigs(6)
+        end if
         call generate_sigma_points(filter%state_estimate, filter%covariance_square_root, filter%ut_gamma, sigma_points)
         do concurrent (i=1:13)
             call cart2pol(obs, sigma_points(:,i), sigma_points_meas(:,i))
@@ -791,14 +793,18 @@ contains
         pred_meas(2) = atan2(ang_sin(1), ang_cos(1))
         pred_meas(4) = atan2(ang_sin(2), ang_cos(2))
         call cart2pol(obs, tgt, tgt_pol)
+        if (.not.present(fid)) then
         write(*,'(4(a,e13.6))') '   Target Polar State :: range: ',tgt_pol(1),', angle: ',tgt_pol(2), &
                                ', range-rate: ',tgt_pol(3),', angle-rate: ',tgt_pol(4)
         write(*,'(4(a,e13.6))') 'Filter Polar Estimate :: range: ',pred_meas(1),', angle: ',pred_meas(2), &
                                ', range-rate: ',pred_meas(3),', angle-rate: ',pred_meas(4)
+        end if
         err_pol = tgt_pol - pred_meas
         err_pol(2) = atan2(sin(err_pol(2)), cos(err_pol(2)))
+        if (.not.present(fid)) then
         write(*,'(4(a,e13.6))') '          Polar Error :: range: ',err_pol(1),', angle: ',err_pol(2), &
                                ', range-rate: ',err_pol(3),', angle-rate: ',err_pol(4)
+        end if
         !! center measurement space sigma points
         do concurrent (i=1:13)
             sigma_points_meas(:,i) = sigma_points_meas(:,i) - pred_meas
@@ -817,8 +823,16 @@ contains
         square_root_measurement_covariance = 0.0_dp
         call extract_rt(amat_t(1:4,:), square_root_measurement_covariance)
         call reform_cov(square_root_measurement_covariance, pz)
-        write(*,'(4(a,e13.6))') '   Polar Track Sigmas :: range: ',sqrt(pz(1,1)),', angle: ',sqrt(pz(2,2)), &
-                               ', range-rate: ',sqrt(pz(3,3)),', angle-rate: ',sqrt(pz(4,4))
+        sigs_pol = sqrt([pz(1,1), pz(2,2), pz(3,3), pz(4,4)])
+        if (.not.present(fid)) then
+        write(*,'(4(a,e13.6))') '   Polar Track Sigmas :: range: ',sigs_pol(1),', angle: ',sigs_pol(2), &
+                               ', range-rate: ',sigs_pol(3),', angle-rate: ',sigs_pol(4)
+        end if
+        if (present(fid)) then
+            write(unit=fid, fmt='(i0,57(",",e22.15))') trial, sim_t, &
+                                                       obs, tgt, filter%state_estimate, err, sigs, abs(err)/sigs, &
+                                                       tgt_pol, pred_meas, err_pol, sigs_pol, abs(err_pol)/sigs_pol
+        end if
         if (present(extra)) then
             if (extra) then
                 do i=1,4
@@ -829,7 +843,7 @@ contains
                 end do
             end if
         end if
-        write(*,'(a,/)') repeat('=', 32)
+        if (.not.present(fid)) write(*,'(a,/)') repeat('=', 32)
     end
 
     pure function rmse(predicted, observed) result(val)
@@ -838,21 +852,6 @@ contains
         real(dp) :: diff2(size(predicted))
         diff2 = (predicted - observed)**2
         val = sqrt(avg(diff2))
-    end
-
-    impure subroutine dump_states(fid, model_ii, t, obs, tgt, trk)
-        integer, intent(in) :: fid, model_ii
-        real(dp), intent(in) :: t, obs(6), tgt(6), trk(6)
-        real(dp) :: trk_err(6), tru_pol(4), trk_pol(4), trk_err_pol(4), pos_vel_acc_err(3)
-        trk_err = abs(trk - tgt)
-        pos_vel_acc_err(1) = sqrt(trk_err(1)**2 + trk_err(2))
-        pos_vel_acc_err(2) = sqrt(trk_err(3)**2 + trk_err(4))
-        pos_vel_acc_err(3) = sqrt(trk_err(5)**2 + trk_err(6))
-        call cart2pol(obs, tgt, tru_pol)
-        call cart2pol(obs, trk, trk_pol)
-        trk_err_pol = abs(trk_pol - tru_pol)
-        write(unit=fid, fmt='(i0,40(",",e13.6))') model_ii, t, obs, tgt, trk, trk_err, pos_vel_acc_err, &
-                                                  tru_pol, trk_pol, trk_err_pol
     end
 
     impure subroutine dump_summary(fid, reps, model_ii, filter_noise, init_sig_scale, init_sig, meas_sig, se_err, se_err_pol, &
@@ -886,11 +885,11 @@ implicit none
     logical, parameter :: debug(*) = [.false., & !! 1, per-observation
                                       .false., & !! 2, per-trial
                                       .false., & !! 3, all-trial summary
-                                      .false., & !! 4, per-observation output to file
+                                      .true., & !! 4, per-observation output to file
                                       .false., & !! 5, per-trial output to file
                                       .true.] !! 6, all-trial summary output to file
     real(dp), parameter :: dt = 1.0_dp
-    integer, parameter :: max_trials = 1024
+    integer, parameter :: max_trials = 10
     real(dp), parameter :: meas_sig1_list(*) = [-1.0_dp, 1.0_dp, 10.0_dp, 100.0_dp, nmi2ft_dp, 10.0_dp*nmi2ft_dp]
     real(dp), parameter :: meas_sig2_list(*) = [-1.0_dp, 0.01_dp*deg2rad_dp, 0.1_dp*deg2rad_dp, deg2rad_dp, 5.0_dp*deg2rad_dp]
     real(dp), parameter :: meas_sig3_list(*) = [-1.0_dp, 0.1_dp, 10.0_dp, 100.0_dp, 200.0_dp, 1000.0_dp]
@@ -921,11 +920,18 @@ implicit none
 
     if (debug(4)) then
         open(newunit=in_run_stats_fid, file='/valinor/in-run-stats.csv', action='write')
-        write(unit=in_run_stats_fid, fmt='(a)') 'state_model_ii,t,obs_x,obs_y,obs_vx,obs_vy,obs_ax,obs_ay,tgt_x,tgt_y,tgt_vx,'// &
-                                                'tgt_vy,tgt_ax,tgt_ay,trk_x,trk_y,trk_vx,trk_vy,trk_ax,trk_ay,trk_err_x,'// &
-                                                'trk_err_y,trk_err_vx,trk_err_vy,trk_err_ax,trk_err_ay,trk_pos_err,trk_vel_err,'// &
-                                                'trk_acc_err,rng,ang,rng_rt,ang_rt,trk_rng,trk_ang,trk_rng_rt,trk_ang_rt,'// &
-                                                'trk_rng_err,trk_ang_err,trk_rng_rt_err,trk_ang_rt_err'
+        write(unit=in_run_stats_fid, fmt='(a)') 'trial,time_sec,'// &
+                                                'obs_x_ft,obs_y_ft,obs_vx_fps,obs_vy_fps,obs_ax_fpss,obs_ay_fpss,'// &
+                                                'tgt_x_ft,tgt_y_ft,tgt_vx_fps,tgt_vy_fps,tgt_ax_fpss,tgt_ay_fpss,'// &
+                                                'trk_x_ft,trk_y_ft,trk_vx_fps,trk_vy_fps,trk_ax_fpss,trk_ay_fpss,'// &
+                                                'err_x_ft,err_y_ft,err_vx_fps,err_vy_fps,err_ax_fpss,err_ay_fpss,'// &
+                                                'sig_x_ft,sig_y_ft,sig_vx_fps,sig_vy_fps,sig_ax_fpss,sig_ay_fpss,'// &
+                                                'e2s_x_ft,e2s_y_ft,e2s_vx_fps,e2s_vy_fps,e2s_ax_fpss,e2s_ay_fpss,'// &
+                                                'tgt_range_ft,tgt_angle_rad,tgt_range_rate_fps,tgt_angle_rate_rps,'// &
+                                                'trk_range_ft,trk_angle_rad,trk_range_rate_fps,trk_angle_rate_rps,'// &
+                                                'err_range_ft,err_angle_rad,err_range_rate_fps,err_angle_rate_rps,'// &
+                                                'sig_range_ft,sig_angle_rad,sig_range_rate_fps,sig_angle_rate_rps,'// &
+                                                'e2s_range_ft,e2s_angle_rad,e2s_range_rate_fps,e2s_angle_rate_rps'
     end if
     if (debug(5)) then
         open(newunit=end_run_stats_fid, file='/valinor/end-run-stats.csv', action='write')
@@ -970,7 +976,7 @@ implicit none
     do ut_lambda_ii=1,1 ! 1,size(ut_lambda_list)
         ut_lambda = ut_lambda_list(ut_lambda_ii)
         ut_kappa = (6.0_dp + ut_lambda)/ut_alpha**2 - 6.0_dp
-    do max_iterations_ii=1,size(max_iterations_list)
+    do max_iterations_ii=1,1 ! 1,size(max_iterations_list)
         max_iterations = max_iterations_list(max_iterations_ii)
 
     do state_model_ii=3,3
@@ -1011,7 +1017,8 @@ implicit none
     else
         call initialize_sr_ukf(obs, meas, init_sig_scale*meas_sig, filter, noise=noise, max_iterations=max_iterations)
     end if
-    if (debug(1)) call print_status(t, obs, tgt, filter)
+    if (debug(1)) call print_status(trial_ii, t, obs, tgt, filter)
+    if (debug(4)) call print_status(trial_ii, t, obs, tgt, filter, in_run_stats_fid)
 
     do while (tgt(2) > 0.0_dp)
         !! evolve simulation time
@@ -1020,10 +1027,9 @@ implicit none
         !! incorporate new measurement
         call generate_observation(obs, tgt, meas, meas_sig)
         call filter_measurement_update(obs, meas, meas_sig, filter, t, state_dynamics_model, opt_data)
-        if (debug(1)) call print_status(t, obs, tgt, filter)
-        if (debug(4)) call dump_states(in_run_stats_fid, state_model_ii, t, obs, tgt, filter%state_estimate)
+        if (debug(1)) call print_status(trial_ii, t, obs, tgt, filter)
+        if (debug(4)) call print_status(trial_ii, t, obs, tgt, filter, in_run_stats_fid)
     end do
-    if (debug(5)) call dump_states(end_run_stats_fid, state_model_ii, t, obs, tgt, filter%state_estimate)
 
     se_err(1:6,trial_ii) = filter%state_estimate - tgt
     se_err(7,trial_ii) = sqrt(se_err(1,trial_ii)**2 + se_err(2,trial_ii)**2) !! position error
@@ -1033,7 +1039,7 @@ implicit none
     call generate_observation(obs, filter%state_estimate, trk_pol)
     se_err_pol(:,trial_ii) = trk_pol - tgt_pol
     if (debug(2)) then
-        call print_status(t, obs, tgt, filter, .true.)
+        call print_status(trial_ii, t, obs, tgt, filter, extra=.true.)
         write(*,'(a)') repeat('=', 32)
         write(*,'(a)') 'State Dynamics Model '//state_dynamics_model_name
         write(*,'(a,e13.6,a,f0.1,a)') 'Filter Noise: ',filter%process_noise,' ft/sec**2 (',filter%process_noise/g,' g)'
