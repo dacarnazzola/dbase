@@ -198,11 +198,11 @@ contains
             dim_var = (0.5_dp*default_range)**2/3.0_dp
             jrjt(1,1) = dim_var
             jrjt(2,2) = dim_var
-            dim_var = filter%maximum_velocity**2/3.0_dp
+            dim_var = (0.5_dp*filter%maximum_velocity)**2/3.0_dp
             jrjt(3,3) = dim_var
             jrjt(4,4) = dim_var
         end if
-        dim_var = filter%maximum_acceleration**2/3.0_dp
+        dim_var = (0.5_dp*filter%maximum_acceleration)**2/3.0_dp
         jrjt(5,5) = jrjt(5,5) + dim_var
         jrjt(6,6) = jrjt(6,6) + dim_var
         call chol(jrjt, filter%covariance_square_root)
@@ -214,7 +214,8 @@ contains
         type(sr_ukf_type), intent(inout) :: filter
         real(dp) :: sigma_points(6,13), sigma_points_meas(4,13), pred_meas(4), innovation(4), amat(4,19), amat_t(19,4), sqrt_wc, &
                     square_root_measurement_covariance(4,4), cross_correlation(6,4), p_xz_transpose(4,6), temp(4,6), &
-                    s_z_transpose(4,4), k_t(4,6), kalman_gain(6,4), p(6,6), pzz_plus_r(4,4), y(4), chi2_0, chi2_now, chi2_diff
+                    s_z_transpose(4,4), k_t(4,6), kalman_gain(6,4), p(6,6), pzz_plus_r(4,4), y(4), chi2_0, chi2_now, chi2_diff, &
+                    ang_sin(2), ang_cos(2)
         integer :: i, meas_dim, meas_ii(4), meas_index, iteration
         !! return early if measurement provides no information
         if (count(meas_sig > 0.0_dp) < 1) then
@@ -241,10 +242,22 @@ contains
             !! center original state estimate dimension sigma_points for use later
             call broadcast_sub(sigma_points, filter%state_estimate)
             !! calculate sigma point weighted average predicted measurement
-            pred_meas = filter%wx_1*sigma_points_meas(:,1)
+            pred_meas(1) = filter%wx_1*sigma_points_meas(1,1)
+            pred_meas(3) = filter%wx_1*sigma_points_meas(3,1)
+            ang_sin(1) = filter%wx_1*sin(sigma_points_meas(2,1))
+            ang_sin(2) = filter%wx_1*sin(sigma_points_meas(4,1))
+            ang_cos(1) = filter%wx_1*cos(sigma_points_meas(2,1))
+            ang_cos(2) = filter%wx_1*cos(sigma_points_meas(4,1))
             do i=1,6
-                pred_meas = pred_meas + filter%w_2_2n1*(sigma_points_meas(:,i+1) + sigma_points_meas(:,i+7))
+                pred_meas(1) = pred_meas(1) + filter%w_2_2n1*(sigma_points_meas(1,i+1) + sigma_points_meas(1,i+7))
+                pred_meas(3) = pred_meas(3) + filter%w_2_2n1*(sigma_points_meas(3,i+1) + sigma_points_meas(3,i+7))
+                ang_sin(1) = ang_sin(1) + filter%w_2_2n1*(sin(sigma_points_meas(2,i+1)) + sin(sigma_points_meas(2,i+7)))
+                ang_sin(2) = ang_sin(2) + filter%w_2_2n1*(sin(sigma_points_meas(4,i+1)) + sin(sigma_points_meas(4,i+7)))
+                ang_cos(1) = ang_cos(1) + filter%w_2_2n1*(cos(sigma_points_meas(2,i+1)) + cos(sigma_points_meas(2,i+7)))
+                ang_cos(2) = ang_cos(2) + filter%w_2_2n1*(cos(sigma_points_meas(4,i+1)) + cos(sigma_points_meas(4,i+7)))
             end do
+            pred_meas(2) = atan2(ang_sin(1), ang_cos(1))
+            pred_meas(4) = atan2(ang_sin(2), ang_cos(2))
             !! calculate innovation
             innovation = 0.0_dp
             do concurrent (i=1:meas_dim)
@@ -394,7 +407,8 @@ contains
         real(dp), intent(in) :: opt_data(:)
         real(dp) :: sigma_points(6,13), sigma_points_meas(4,13), pred_meas(4), innovation(4), amat(4,19), amat_t(19,4), sqrt_wc, &
                     square_root_measurement_covariance(4,4), cross_correlation(6,4), p_xz_transpose(4,6), temp(4,6), r_alpha, &
-                    s_z_transpose(4,4), k_t(4,6), kalman_gain(6,4), p(6,6), pzz_plus_r(4,4), y(4), chi2_0, chi2_now, chi2_diff
+                    s_z_transpose(4,4), k_t(4,6), kalman_gain(6,4), p(6,6), pzz_plus_r(4,4), y(4), chi2_0, chi2_now, chi2_diff, &
+                    ang_sin(2), ang_cos(2)
         integer :: i, meas_dim, meas_ii(4), meas_index, iteration
         !! update filter to current time
         call filter_time_update(filter, t, state_dynamics_model, opt_data)
@@ -423,10 +437,22 @@ contains
             !! center original state estimate dimension sigma_points for use later
             call broadcast_sub(sigma_points, filter%state_estimate)
             !! calculate sigma point weighted average predicted measurement
-            pred_meas = filter%wx_1*sigma_points_meas(:,1)
+            pred_meas(1) = filter%wx_1*sigma_points_meas(1,1)
+            pred_meas(3) = filter%wx_1*sigma_points_meas(3,1)
+            ang_sin(1) = filter%wx_1*sin(sigma_points_meas(2,1))
+            ang_sin(2) = filter%wx_1*sin(sigma_points_meas(4,1))
+            ang_cos(1) = filter%wx_1*cos(sigma_points_meas(2,1))
+            ang_cos(2) = filter%wx_1*cos(sigma_points_meas(4,1))
             do i=1,6
-                pred_meas = pred_meas + filter%w_2_2n1*(sigma_points_meas(:,i+1) + sigma_points_meas(:,i+7))
+                pred_meas(1) = pred_meas(1) + filter%w_2_2n1*(sigma_points_meas(1,i+1) + sigma_points_meas(1,i+7))
+                pred_meas(3) = pred_meas(3) + filter%w_2_2n1*(sigma_points_meas(3,i+1) + sigma_points_meas(3,i+7))
+                ang_sin(1) = ang_sin(1) + filter%w_2_2n1*(sin(sigma_points_meas(2,i+1)) + sin(sigma_points_meas(2,i+7)))
+                ang_sin(2) = ang_sin(2) + filter%w_2_2n1*(sin(sigma_points_meas(4,i+1)) + sin(sigma_points_meas(4,i+7)))
+                ang_cos(1) = ang_cos(1) + filter%w_2_2n1*(cos(sigma_points_meas(2,i+1)) + cos(sigma_points_meas(2,i+7)))
+                ang_cos(2) = ang_cos(2) + filter%w_2_2n1*(cos(sigma_points_meas(4,i+1)) + cos(sigma_points_meas(4,i+7)))
             end do
+            pred_meas(2) = atan2(ang_sin(1), ang_cos(1))
+            pred_meas(4) = atan2(ang_sin(2), ang_cos(2))
             !! calculate innovation
             innovation = 0.0_dp
             do concurrent (i=1:meas_dim)
@@ -722,10 +748,11 @@ contains
         type(sr_ukf_type), intent(in) :: filter
         logical, intent(in), optional :: extra
         real(dp) :: p(6,6), sigma_points(6,13), sigma_points_meas(4,13), pred_meas(4), amat(4,13), amat_t(13,4), &
-                    square_root_measurement_covariance(4,4), sqrt_wc, pz(4,4), tgt_pol(4), err_pol(4)
+                    square_root_measurement_covariance(4,4), sqrt_wc, pz(4,4), tgt_pol(4), err_pol(4), ang_sin(2), ang_cos(2)
         integer :: i
         write(*,'(a)') repeat('=', 32)
         write(*,'(a,2(f0.4,a))') 'Simulation Time: ',sim_t,' seconds, Filter Time: ',filter%state_estimate_time,' seconds'
+        write(*,'(4(a,f0.4))') 'Wx0: ',filter%wx_1,', Wc0: ',filter%wc_1,', Wi: ',filter%w_2_2n1,', gamma: ',filter%ut_gamma
         write(*,'(6(a,e13.6))') '       Observer State :: x: ',obs(1),', y: ',obs(2), &
                                ', vx: ',obs(3),', vy: ',obs(4),', ax: ',obs(5),', ay: ',obs(6)
         write(*,'(6(a,e13.6))') '         Target State :: x: ',tgt(1),', y: ',tgt(2), &
@@ -747,10 +774,22 @@ contains
             call cart2pol(obs, sigma_points(:,i), sigma_points_meas(:,i))
         end do
         !! calculate sigma point weighted average predicted measurement
-        pred_meas = filter%wx_1*sigma_points_meas(:,1)
+        pred_meas(1) = filter%wx_1*sigma_points_meas(1,1)
+        pred_meas(3) = filter%wx_1*sigma_points_meas(3,1)
+        ang_sin(1) = filter%wx_1*sin(sigma_points_meas(2,1))
+        ang_sin(2) = filter%wx_1*sin(sigma_points_meas(4,1))
+        ang_cos(1) = filter%wx_1*cos(sigma_points_meas(2,1))
+        ang_cos(2) = filter%wx_1*cos(sigma_points_meas(4,1))
         do i=1,6
-            pred_meas = pred_meas + filter%w_2_2n1*(sigma_points_meas(:,i+1) + sigma_points_meas(:,i+7))
+            pred_meas(1) = pred_meas(1) + filter%w_2_2n1*(sigma_points_meas(1,i+1) + sigma_points_meas(1,i+7))
+            pred_meas(3) = pred_meas(3) + filter%w_2_2n1*(sigma_points_meas(3,i+1) + sigma_points_meas(3,i+7))
+            ang_sin(1) = ang_sin(1) + filter%w_2_2n1*(sin(sigma_points_meas(2,i+1)) + sin(sigma_points_meas(2,i+7)))
+            ang_sin(2) = ang_sin(2) + filter%w_2_2n1*(sin(sigma_points_meas(4,i+1)) + sin(sigma_points_meas(4,i+7)))
+            ang_cos(1) = ang_cos(1) + filter%w_2_2n1*(cos(sigma_points_meas(2,i+1)) + cos(sigma_points_meas(2,i+7)))
+            ang_cos(2) = ang_cos(2) + filter%w_2_2n1*(cos(sigma_points_meas(4,i+1)) + cos(sigma_points_meas(4,i+7)))
         end do
+        pred_meas(2) = atan2(ang_sin(1), ang_cos(1))
+        pred_meas(4) = atan2(ang_sin(2), ang_cos(2))
         call cart2pol(obs, tgt, tgt_pol)
         write(*,'(4(a,e13.6))') '   Target Polar State :: range: ',tgt_pol(1),', angle: ',tgt_pol(2), &
                                ', range-rate: ',tgt_pol(3),', angle-rate: ',tgt_pol(4)
@@ -778,8 +817,8 @@ contains
         square_root_measurement_covariance = 0.0_dp
         call extract_rt(amat_t(1:4,:), square_root_measurement_covariance)
         call reform_cov(square_root_measurement_covariance, pz)
-        write(*,'(4(a,e13.6))') '   Polar Track Sigmas :: range: ',sqrt(pz(1,1)),', angle: ',sqrt(pz(2,2))*rad2deg_dp, &
-                               ', range-rate: ',sqrt(pz(3,3)),', angle-rate: ',sqrt(pz(4,4))*rad2deg_dp
+        write(*,'(4(a,e13.6))') '   Polar Track Sigmas :: range: ',sqrt(pz(1,1)),', angle: ',sqrt(pz(2,2)), &
+                               ', range-rate: ',sqrt(pz(3,3)),', angle-rate: ',sqrt(pz(4,4))
         if (present(extra)) then
             if (extra) then
                 do i=1,4
@@ -844,14 +883,14 @@ program ex_sr_ukf
 use, non_intrinsic :: ukf
 implicit none
 
-    logical, parameter :: debug(*) = [.true., & !! 1, per-observation
+    logical, parameter :: debug(*) = [.false., & !! 1, per-observation
                                       .false., & !! 2, per-trial
                                       .false., & !! 3, all-trial summary
                                       .false., & !! 4, per-observation output to file
                                       .false., & !! 5, per-trial output to file
                                       .true.] !! 6, all-trial summary output to file
     real(dp), parameter :: dt = 1.0_dp
-    integer, parameter :: max_trials = 10
+    integer, parameter :: max_trials = 1024
     real(dp), parameter :: meas_sig1_list(*) = [-1.0_dp, 1.0_dp, 10.0_dp, 100.0_dp, nmi2ft_dp, 10.0_dp*nmi2ft_dp]
     real(dp), parameter :: meas_sig2_list(*) = [-1.0_dp, 0.01_dp*deg2rad_dp, 0.1_dp*deg2rad_dp, deg2rad_dp, 5.0_dp*deg2rad_dp]
     real(dp), parameter :: meas_sig3_list(*) = [-1.0_dp, 0.1_dp, 10.0_dp, 100.0_dp, 200.0_dp, 1000.0_dp]
@@ -931,7 +970,7 @@ implicit none
     do ut_lambda_ii=1,1 ! 1,size(ut_lambda_list)
         ut_lambda = ut_lambda_list(ut_lambda_ii)
         ut_kappa = (6.0_dp + ut_lambda)/ut_alpha**2 - 6.0_dp
-    do max_iterations_ii=1,1 ! 1,size(max_iterations_list)
+    do max_iterations_ii=1,size(max_iterations_list)
         max_iterations = max_iterations_list(max_iterations_ii)
 
     do state_model_ii=3,3
@@ -966,7 +1005,12 @@ implicit none
 !    call generate_observation(obs, tgt, meas, init_sig)
 !    call initialize_sr_ukf(obs, meas, init_sig_scale*init_sig, filter, noise=noise, k=ut_kappa, a=ut_alpha)
     call generate_observation(obs, tgt, meas, meas_sig)
-    call initialize_sr_ukf(obs, meas, init_sig_scale*meas_sig, filter, noise=noise, k=ut_kappa, a=ut_alpha, max_iterations=max_iterations)
+    if (ut_alpha >= 0.0_dp) then
+        call initialize_sr_ukf(obs, meas, init_sig_scale*meas_sig, filter, &
+                               noise=noise, k=ut_kappa, a=ut_alpha, max_iterations=max_iterations)
+    else
+        call initialize_sr_ukf(obs, meas, init_sig_scale*meas_sig, filter, noise=noise, max_iterations=max_iterations)
+    end if
     if (debug(1)) call print_status(t, obs, tgt, filter)
 
     do while (tgt(2) > 0.0_dp)
