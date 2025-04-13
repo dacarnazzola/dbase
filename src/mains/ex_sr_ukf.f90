@@ -948,7 +948,7 @@ implicit none
                                       .false., & !! 5, per-trial output to file
                                       .true.] !! 6, all-trial summary output to file
     real(dp), parameter :: dt = 1.0_dp
-    integer, parameter :: max_trials = 1024
+    integer, parameter :: max_trials = 128
     real(dp), parameter :: meas_sig1_list(*) = [-1.0_dp, 1.0_dp, 10.0_dp, 100.0_dp, nmi2ft_dp, 10.0_dp*nmi2ft_dp]
     real(dp), parameter :: meas_sig2_list(*) = [-1.0_dp, 0.01_dp*deg2rad_dp, 0.1_dp*deg2rad_dp, deg2rad_dp, 5.0_dp*deg2rad_dp]
     real(dp), parameter :: meas_sig3_list(*) = [-1.0_dp, 0.1_dp, 10.0_dp, 100.0_dp, 200.0_dp, 1000.0_dp]
@@ -1039,7 +1039,7 @@ implicit none
         ut_kappa = ut_kappa_list(ut_kappa_ii)
     do ut_beta_ii=1,1 ! 1,size(ut_beta_list)
         ut_beta = ut_beta_list(ut_beta_ii)
-    do max_iterations_ii=1,2 ! 1,size(max_iterations_list)
+    do max_iterations_ii=1,size(max_iterations_list)
         max_iterations = max_iterations_list(max_iterations_ii)
 
     do state_model_ii=3,3
