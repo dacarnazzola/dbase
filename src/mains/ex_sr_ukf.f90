@@ -913,10 +913,10 @@ contains
     end
 
     impure subroutine dump_summary(fid, reps, model_ii, filter_noise, init_sig_scale, init_sig, meas_sig, se_err, se_err_pol, &
-                                   ut_alpha, ut_lambda, ut_kappa, max_iterations)
+                                   ut_alpha, ut_lambda, ut_kappa, ut_beta, max_iterations)
         integer, intent(in) :: fid, reps, model_ii, max_iterations
         real(dp), intent(in) :: filter_noise, init_sig_scale, init_sig(4), meas_sig(4), se_err(:,:), se_err_pol(:,:), ut_alpha, &
-                                ut_lambda, ut_kappa
+                                ut_lambda, ut_kappa, ut_beta
         real(dp) :: rmse_state(size(se_err,dim=1)), rmse_pol(size(se_err_pol,dim=1))
         integer :: i
         call debug_error_condition(size(se_err,dim=1) /= 9, 'se_err should have 9 rows')
@@ -928,8 +928,9 @@ contains
         do concurrent (i=1:size(rmse_pol))
             rmse_pol(i) = rmse(se_err_pol(i,:), 0.0_dp)
         end do
-        write(unit=fid, fmt='(i0,",",i0,26(",",e13.6),",",i0)') reps, model_ii, filter_noise, init_sig_scale, init_sig, &
-                                                                meas_sig, rmse_state, rmse_pol, ut_alpha, ut_lambda, ut_kappa, &
+        write(unit=fid, fmt='(i0,",",i0,27(",",e13.6),",",i0)') reps, model_ii, filter_noise, init_sig_scale, init_sig, &
+                                                                meas_sig, rmse_state, rmse_pol, &
+                                                                ut_alpha, ut_lambda, ut_kappa, ut_beta, &
                                                                 max_iterations
     end
 
@@ -943,7 +944,7 @@ implicit none
     logical, parameter :: debug(*) = [.false., & !! 1, per-observation
                                       .false., & !! 2, per-trial
                                       .false., & !! 3, all-trial summary
-                                      .false., & !! 4, per-observation output to file
+                                      .true., & !! 4, per-observation output to file
                                       .false., & !! 5, per-trial output to file
                                       .true.] !! 6, all-trial summary output to file
     real(dp), parameter :: dt = 1.0_dp
@@ -955,22 +956,23 @@ implicit none
     real(dp), parameter :: init_scale_list(*) = [1.0_dp, 1.5_dp, 2.0_dp, 2.5_dp, 3.0_dp, 3.5_dp, 4.0_dp, 4.5_dp, 5.0_dp, 5.5_dp, &
                                                  6.0_dp, 6.5_dp, 7.0_dp, 7.5_dp, 8.0_dp, 8.5_dp, 9.0_dp]
     real(dp), parameter :: noise_list(*) = [0.01_dp/g, 0.01_dp, 0.1_dp, 1.0_dp, 2.0_dp, 3.0_dp, 4.0_dp, 5.0_dp, 6.0_dp, 9.0_dp]*g
-    real(dp), parameter :: ut_alpha_list(*) = [0.001_dp, 0.002_dp, 0.003_dp, 0.004_dp, 0.005_dp, 0.006_dp, 0.007_dp, 0.008_dp, &
-                                               0.009_dp, 0.01_dp, 0.02_dp, 0.03_dp, 0.04_dp, 0.05_dp, 0.06_dp, 0.07_dp, 0.08_dp, &
-                                               0.09_dp, 0.1_dp, 0.2_dp, 0.3_dp, 0.4_dp, 0.5_dp, 0.6_dp, 0.7_dp, 0.8_dp, 0.9_dp, &
-                                               1.0_dp]
+    real(dp), parameter :: ut_alpha_list(*) = [1.0_dp, 0.9_dp, 0.8_dp, 0.7_dp, 0.6_dp, 0.5_dp, 0.4_dp, 0.3_dp, 0.2_dp, 0.1_dp, &
+                                               0.09_dp, 0.08_dp, 0.07_dp, 0.06_dp, 0.05_dp, 0.04_dp, 0.03_dp, 0.02_dp, 0.01_dp, &
+                                               0.009_dp, 0.008_dp, 0.007_dp, 0.006_dp, 0.005_dp, 0.004_dp, 0.003_dp, 0.002_dp, &
+                                               0.001_dp]
     real(dp), parameter :: ut_kappa_list(*) = [0.0_dp, -3.0_dp]
+    real(dp), parameter :: ut_beta_list(*) = [2.0_dp, 1.5_dp, 1.0_dp, 0.5_dp, 0.0_dp]
     integer, parameter :: max_iterations_list(*) = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 
     type(sr_ukf_type) :: filter
     real(dp) :: obs(6), tgt(6), meas(4), meas_sig(4), init_sig(4), t, no_opt_data(0), se_err(9,max_trials), tgt0(6), tgt_pol(4), &
-                se_err_pol(4,max_trials), trk_pol(4), noise, init_sig_scale, ut_alpha, ut_lambda, ut_kappa
+                se_err_pol(4,max_trials), trk_pol(4), noise, init_sig_scale, ut_alpha, ut_lambda, ut_kappa, ut_beta
     procedure(dynamics_model), pointer :: state_dynamics_model
     character(len=:), allocatable :: state_dynamics_model_name
     real(dp), allocatable :: opt_data(:)
     integer :: state_model_ii, trial_ii, i, in_run_stats_fid, end_run_stats_fid, meas_sig1_ii, meas_sig2_ii, meas_sig3_ii, &
                meas_sig4_ii, sr_ukf_summary_fid, noise_ii, init_sig1_ii, init_sig2_ii, init_sig3_ii, init_sig4_ii, init_scale_ii, &
-               ut_alpha_ii, ut_kappa_ii, max_iterations_ii, max_iterations
+               ut_alpha_ii, ut_kappa_ii, max_iterations_ii, max_iterations, ut_beta_ii
 
     !! observer initial conditions
     obs = 0.0_dp
@@ -1005,7 +1007,8 @@ implicit none
         write(unit=sr_ukf_summary_fid, fmt='(a)') 'reps,state_model_ii,process_noise,init_sig_scale,init_sig_rng,init_sig_ang,'// &
                                                   'init_sig_rng_rt,init_sig_ang_rt,sig_rng,sig_ang,sig_rng_rt,sig_ang_rt,'// &
                                                   'rmse_x,rmse_y,rmse_vx,rmse_vy,rmse_ax,rmse_ay,rmse_pos,rmse_vel,rmse_acc,'// &
-                                                  'rmse_rng,rmse_ang,rmse_rng_rt,rmse_ang_rt,ut_alpha,ut_lambda,ut_kappa,'// &
+                                                  'rmse_rng,rmse_ang,rmse_rng_rt,rmse_ang_rt,'// &
+                                                  'ut_alpha,ut_lambda,ut_kappa,ut_beta,'// &
                                                   'max_iterations'
     end if
 
@@ -1018,22 +1021,24 @@ implicit none
         init_sig(3) = meas_sig3_list(init_sig3_ii)
     do init_sig4_ii=1,1 ! 1,size(meas_sig4_list)
         init_sig(4) = meas_sig4_list(init_sig4_ii)
-    do init_scale_ii=1,size(init_scale_list)
+    do init_scale_ii=1,1 ! 1,size(init_scale_list)
         init_sig_scale = init_scale_list(init_scale_ii)
-    do meas_sig1_ii=2,6,4 ! 2,size(meas_sig1_list)
+    do meas_sig1_ii=6,6 ! 2,size(meas_sig1_list)
         meas_sig(1) = meas_sig1_list(meas_sig1_ii)
-    do meas_sig2_ii=2,5,3 ! 2,size(meas_sig2_list)
+    do meas_sig2_ii=5,5 ! 2,size(meas_sig2_list)
         meas_sig(2) = meas_sig2_list(meas_sig2_ii)
-    do meas_sig3_ii=2,6,4 ! 2,size(meas_sig3_list)
+    do meas_sig3_ii=6,6 ! 2,size(meas_sig3_list)
         meas_sig(3) = meas_sig3_list(meas_sig3_ii)
     do meas_sig4_ii=1,1 ! 1,size(meas_sig4_list)
         meas_sig(4) = meas_sig4_list(meas_sig4_ii)
     do noise_ii=4,4 ! 1,size(noise_list)
         noise = noise_list(noise_ii)
-    do ut_alpha_ii=1,size(ut_alpha_list)
+    do ut_alpha_ii=1,1 ! 1,size(ut_alpha_list)
         ut_alpha = ut_alpha_list(ut_alpha_ii)
-    do ut_kappa_ii=1,size(ut_kappa_list)
+    do ut_kappa_ii=1,1 ! 1,size(ut_kappa_list)
         ut_kappa = ut_kappa_list(ut_kappa_ii)
+    do ut_beta_ii=1,1 ! 1,size(ut_beta_list)
+        ut_beta = ut_beta_list(ut_beta_ii)
     do max_iterations_ii=1,2 ! 1,size(max_iterations_list)
         max_iterations = max_iterations_list(max_iterations_ii)
 
@@ -1069,7 +1074,7 @@ implicit none
 !    call generate_observation(obs, tgt, meas, init_sig)
 !    call initialize_sr_ukf(obs, meas, init_sig_scale*init_sig, filter, noise=noise, k=ut_kappa, a=ut_alpha)
     call generate_observation(obs, tgt, meas, meas_sig)
-    call initialize_sr_ukf(obs, meas, meas_sig, init_sig_scale, filter, noise=noise, k=ut_kappa, a=ut_alpha, &
+    call initialize_sr_ukf(obs, meas, meas_sig, init_sig_scale, filter, noise=noise, k=ut_kappa, a=ut_alpha, b=ut_beta, &
                            max_iterations=max_iterations)
     if (debug(1)) call print_status(trial_ii, t, obs, tgt, filter)
     if (debug(4)) call print_status(trial_ii, t, obs, tgt, filter, in_run_stats_fid)
@@ -1114,7 +1119,7 @@ implicit none
     if (debug(6)) then
         ut_lambda = ut_alpha**2 * (6.0_dp + ut_kappa) - 6.0_dp
         call dump_summary(sr_ukf_summary_fid, max_trials, state_model_ii, noise, init_sig_scale, init_sig, &
-                          meas_sig, se_err, se_err_pol, ut_alpha, ut_lambda, ut_kappa, max_iterations)
+                          meas_sig, se_err, se_err_pol, ut_alpha, ut_lambda, ut_kappa, ut_beta, max_iterations)
         flush(sr_ukf_summary_fid)
     end if
     if (debug(3)) then
@@ -1139,6 +1144,7 @@ implicit none
     end if
 
     end do !! max_iterations_ii
+    end do !! ut_beta_ii
     end do !! ut_kappa_ii
     end do !! ut_alpha_ii
     end do !! state_model_ii
