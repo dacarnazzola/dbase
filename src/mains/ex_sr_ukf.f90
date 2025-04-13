@@ -50,9 +50,9 @@ private
 
 contains
 
-    impure subroutine initialize_sr_ukf(obs, meas, meas_sig, filter, t, noise, max_vel, def_vel, max_acc, def_acc, k, a, b, def_rng, &
-                                      max_iterations)
-        real(dp), intent(in) :: obs(6), meas(4), meas_sig(4)
+    impure subroutine initialize_sr_ukf(obs, meas, meas_sig, init_sig_scale, filter, t, noise, max_vel, def_vel, max_acc, def_acc, &
+                                        k, a, b, def_rng, max_iterations)
+        real(dp), intent(in) :: obs(6), meas(4), meas_sig(4), init_sig_scale
         type(sr_ukf_type), intent(out) :: filter
         real(dp), intent(in), optional :: t, noise, max_vel, max_acc, k, a, b, def_rng, def_vel(2), def_acc(2)
         integer, intent(in), optional :: max_iterations
@@ -206,7 +206,7 @@ contains
         jrjt(5,5) = jrjt(5,5) + dim_var
         jrjt(6,6) = jrjt(6,6) + dim_var
         call chol(jrjt, filter%covariance_square_root)
-        call iterate_p0(obs, meas, meas_sig, filter)
+        call iterate_p0(obs, meas, init_sig_scale*meas_sig, filter)
     end
 
     impure subroutine iterate_p0(obs, meas, meas_sig, filter)
@@ -947,7 +947,7 @@ implicit none
                                       .false., & !! 5, per-trial output to file
                                       .true.] !! 6, all-trial summary output to file
     real(dp), parameter :: dt = 1.0_dp
-    integer, parameter :: max_trials = 128
+    integer, parameter :: max_trials = 1024
     real(dp), parameter :: meas_sig1_list(*) = [-1.0_dp, 1.0_dp, 10.0_dp, 100.0_dp, nmi2ft_dp, 10.0_dp*nmi2ft_dp]
     real(dp), parameter :: meas_sig2_list(*) = [-1.0_dp, 0.01_dp*deg2rad_dp, 0.1_dp*deg2rad_dp, deg2rad_dp, 5.0_dp*deg2rad_dp]
     real(dp), parameter :: meas_sig3_list(*) = [-1.0_dp, 0.1_dp, 10.0_dp, 100.0_dp, 200.0_dp, 1000.0_dp]
@@ -1018,23 +1018,23 @@ implicit none
         init_sig(3) = meas_sig3_list(init_sig3_ii)
     do init_sig4_ii=1,1 ! 1,size(meas_sig4_list)
         init_sig(4) = meas_sig4_list(init_sig4_ii)
-    do init_scale_ii=1,1 ! 1,size(init_scale_list)
+    do init_scale_ii=1,size(init_scale_list)
         init_sig_scale = init_scale_list(init_scale_ii)
-    do meas_sig1_ii=2,size(meas_sig1_list)
+    do meas_sig1_ii=2,6,4 ! 2,size(meas_sig1_list)
         meas_sig(1) = meas_sig1_list(meas_sig1_ii)
-    do meas_sig2_ii=2,size(meas_sig2_list)
+    do meas_sig2_ii=2,5,3 ! 2,size(meas_sig2_list)
         meas_sig(2) = meas_sig2_list(meas_sig2_ii)
-    do meas_sig3_ii=1,1 ! 2,size(meas_sig3_list)
+    do meas_sig3_ii=2,6,4 ! 2,size(meas_sig3_list)
         meas_sig(3) = meas_sig3_list(meas_sig3_ii)
     do meas_sig4_ii=1,1 ! 1,size(meas_sig4_list)
         meas_sig(4) = meas_sig4_list(meas_sig4_ii)
-    do noise_ii=1,size(noise_list)
+    do noise_ii=4,4 ! 1,size(noise_list)
         noise = noise_list(noise_ii)
-    do ut_alpha_ii=28,28 ! 1,size(ut_alpha_list)
+    do ut_alpha_ii=1,size(ut_alpha_list)
         ut_alpha = ut_alpha_list(ut_alpha_ii)
     do ut_kappa_ii=1,size(ut_kappa_list)
         ut_kappa = ut_kappa_list(ut_kappa_ii)
-    do max_iterations_ii=1,1 ! 1,size(max_iterations_list)
+    do max_iterations_ii=1,2 ! 1,size(max_iterations_list)
         max_iterations = max_iterations_list(max_iterations_ii)
 
     do state_model_ii=3,3
@@ -1069,7 +1069,7 @@ implicit none
 !    call generate_observation(obs, tgt, meas, init_sig)
 !    call initialize_sr_ukf(obs, meas, init_sig_scale*init_sig, filter, noise=noise, k=ut_kappa, a=ut_alpha)
     call generate_observation(obs, tgt, meas, meas_sig)
-    call initialize_sr_ukf(obs, meas, init_sig_scale*meas_sig, filter, noise=noise, k=ut_kappa, a=ut_alpha, &
+    call initialize_sr_ukf(obs, meas, meas_sig, init_sig_scale, filter, noise=noise, k=ut_kappa, a=ut_alpha, &
                            max_iterations=max_iterations)
     if (debug(1)) call print_status(trial_ii, t, obs, tgt, filter)
     if (debug(4)) call print_status(trial_ii, t, obs, tgt, filter, in_run_stats_fid)
